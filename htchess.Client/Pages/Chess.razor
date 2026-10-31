@@ -528,9 +528,7 @@
 
     private async Task CopyPgn()
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Pgn()); }
-        catch (JSException) { }
-        catch (JSDisconnectedException) { }
+        await Js("copyText", Pgn());
     }
 
     private static readonly Dictionary<char, string> Glyphs = new()

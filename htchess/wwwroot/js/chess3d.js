@@ -725,6 +725,20 @@ export function _state() {
     return dotNet ? dotNet.invokeMethodAsync('DebugState') : Promise.resolve('no dotNet');
 }
 
+// clipboard: navigator.clipboard is only available in secure contexts (localhost/https);
+// on http://IP origins fall back to the execCommand path.
+export function copyText(text) {
+    if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch { }
+    ta.remove();
+    return Promise.resolve();
+}
+
 // bridge for debugging & legacy callers (primary path is IJSObjectReference)
-globalThis.chess3d = { initScene, setPieces, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state,
+globalThis.chess3d = { initScene, setPieces, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
     _setupFen: (fen) => dotNet?.invokeMethodAsync('DebugSetupFen', fen) };
