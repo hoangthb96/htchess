@@ -37,7 +37,8 @@
     background: #1e2128;
     border-radius: 8px;
     color: #e8e8e8;
-    overflow: hidden;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .side-panel h3 { margin: 0; }
@@ -53,10 +54,13 @@
 
 .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
+.btn-row .btn:disabled { opacity: 0.35; }
+
 .captured { font-size: 0.85rem; opacity: 0.85; line-height: 1.5; }
 
 .movelist {
     flex: 1;
+    min-height: 9rem;
     overflow-y: auto;
     font-size: 0.9rem;
     padding-right: 0.25rem;
@@ -131,6 +135,8 @@
     border-radius: 6px;
     z-index: 6;
 }
+.clock-top { top: 0.6rem; left: 3.4rem; } /* clear of the nav ☰ button */
+.clock-bottom { bottom: 0.6rem; }
 .clock.hot { background: #3a5d34; color: #fff; }
 
 .end-overlay {
@@ -178,14 +184,13 @@
 }
 .eval-num {
     position: absolute;
-    top: 0.25rem;
+    bottom: 0.3rem;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 0.6rem;
+    font-size: 0.68rem;
     font-weight: 700;
-    color: #ffd966;
-    writing-mode: vertical-rl;
-    text-shadow: 0 0 3px #000;
+    color: #fff;
+    mix-blend-mode: difference; /* dark on the light fill, light on the dark track */
 }
 
 @media (max-width: 800px) {

@@ -12,8 +12,8 @@
 
         @if (ClockOn)
         {
-            <div class="clock @(TopClockHot ? "hot" : "")" style="top: 0.6rem;">@Fmt(TopMs)</div>
-            <div class="clock @(BottomClockHot ? "hot" : "")" style="bottom: 0.6rem;">@Fmt(BottomMs)</div>
+            <div class="clock clock-top @(TopClockHot ? "hot" : "")">@Fmt(TopMs)</div>
+            <div class="clock clock-bottom @(BottomClockHot ? "hot" : "")">@Fmt(BottomMs)</div>
         }
 
         @if (_session.AwaitingPromotion)
@@ -97,7 +97,7 @@
         <div class="btn-row">
             <button class="btn btn-outline-secondary" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)">Hoàn nước</button>
             <button class="btn btn-outline-secondary" @onclick="Flip">Xoay bàn</button>
-            <button class="btn btn-outline-secondary" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">⧉ PGN</button>
+            <button class="btn @(_copied ? "btn-success" : "btn-outline-secondary")" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">@(_copied ? "✓ Đã chép" : "⧉ PGN")</button>
         </div>
 
         <div class="captured">
@@ -461,6 +461,7 @@
         _session.NewGame(mode, humanWhite);
         _confirmResign = _confirmDraw = _drawDeclined = false;
         _fenError = false;
+        _fenInput = ""; // a new game leaves any stale FEN text incoherent with the board
         ResetClock();
         // vs AI the human always sits at the bottom
         _flipped = mode == GameMode.VsAi && !humanWhite;
@@ -526,9 +527,14 @@
         return sb.ToString();
     }
 
+    private bool _copied;
+
     private async Task CopyPgn()
     {
         await Js("copyText", Pgn());
+        _copied = true;
+        StateHasChanged();
+        _ = Task.Delay(1500).ContinueWith(_ => { _copied = false; InvokeAsync(StateHasChanged); });
     }
 
     private static readonly Dictionary<char, string> Glyphs = new()

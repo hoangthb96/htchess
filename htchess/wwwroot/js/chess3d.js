@@ -188,7 +188,7 @@ export function initScene(canvasEl, dotNetRef) {
     scene.fog = new THREE.Fog(0x1a1d24, 35, 70);
 
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, 11.5, 6.9);
+    camera.position.set(0, 12.2, 6.3);
 
     controls = new OrbitControls(camera, canvas);
     controls.enablePan = false;

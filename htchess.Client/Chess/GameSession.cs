@@ -448,10 +448,13 @@ public sealed class GameSession
         Pos.MakeMove(move, in st);
         TrackPosition();
         _fens.Add(Pos.FenNotation);
-        _history.Add((move, st, san));
         LastFrom = move.FromSquare().ToString();
         LastTo = kingDest;
         RefreshLegal();
+        // ChessLib omits the +/# suffixes; mate = opponent in check with no legal replies
+        if (Pos.InCheck && !san.EndsWith('+') && !san.EndsWith('#'))
+            san += _legal.Count == 0 ? "#" : "+";
+        _history.Add((move, st, san));
 
         return new AppliedMove(
             LastFrom, kingDest,
