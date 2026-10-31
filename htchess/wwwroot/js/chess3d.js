@@ -259,7 +259,9 @@ export function initScene(canvasEl, dotNetRef) {
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('keydown', onKeyNav);
 
     resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas.parentElement || canvas);
@@ -305,8 +307,20 @@ function planePoint(e, y = 0) {
     return raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
 }
 
+function onContextMenu(e) { e.preventDefault(); }
+
+const NAV_KEYS = { ArrowLeft: 'prev', ArrowRight: 'next', ArrowUp: 'start', ArrowDown: 'end', Home: 'start', End: 'end' };
+function onKeyNav(e) {
+    if (!dotNet) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
+    const dir = NAV_KEYS[e.key];
+    if (dir) { e.preventDefault(); dotNet.invokeMethodAsync('NavKey', dir); }
+}
+
 function onPointerDown(e) {
-    if (!dotNet || e.button !== 0) return;
+    if (!dotNet) return;
+    if (e.button === 2) { dotNet.invokeMethodAsync('RightClicked'); return; }
+    if (e.button !== 0) return;
     const hit = pickAt(e);
     if (hit.kind === 'piece') {
         const mesh = pieceMeshes[hit.sq];
@@ -693,7 +707,9 @@ export function dispose() {
     resizeObserver?.disconnect();
     canvas?.removeEventListener('pointerdown', onPointerDown);
     canvas?.removeEventListener('pointermove', onPointerMove);
+    canvas?.removeEventListener('contextmenu', onContextMenu);
     window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('keydown', onKeyNav);
     controls?.dispose();
     renderer?.dispose();
     renderer = scene = camera = controls = null;

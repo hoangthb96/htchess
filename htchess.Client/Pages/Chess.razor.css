@@ -155,6 +155,35 @@
 
 .hint { font-size: 0.8rem; opacity: 0.7; }
 
+.eval-bar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1.1rem;
+    background: #26262b;
+    z-index: 4;
+}
+.eval-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #e8e4da;
+    transition: height 0.35s ease;
+}
+.eval-num {
+    position: absolute;
+    top: 0.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #ffd966;
+    writing-mode: vertical-rl;
+    text-shadow: 0 0 3px #000;
+}
+
 @media (max-width: 800px) {
     .chess-layout { flex-direction: column; height: auto; }
     .board-area { aspect-ratio: 1; }

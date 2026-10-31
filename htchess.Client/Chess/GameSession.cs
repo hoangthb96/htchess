@@ -257,8 +257,8 @@ public sealed class GameSession
                 return TryCommit(from, squareName, null);
         }
 
-        // clicked a legal target of current selection
-        if (Selected is not null && SelectedTargets.Contains(squareName))
+        // clicked a legal target of current selection (incl. own-rook castle squares)
+        if (Selected is not null && FindCandidates(Selected, squareName).Count > 0)
             return TryCommit(Selected, squareName, null);
 
         // clicked own piece -> select
@@ -321,8 +321,17 @@ public sealed class GameSession
     private static string DisplayTarget(Move m) => CastleKingDest(m) ?? m.ToSquare().ToString();
 
     private List<Move> FindCandidates(string from, string to) => _legal
-        .Where(m => m.FromSquare().ToString() == from && DisplayTarget(m) == to)
+        .Where(m => m.FromSquare().ToString() == from &&
+                    (DisplayTarget(m) == to || m.ToSquare().ToString() == to))
         .ToList();
+
+    /// Right-click: drop selection and premove without making a move.
+    public void ClearSelection()
+    {
+        Selected = null;
+        SelectedTargets.Clear();
+        PremoveFrom = PremoveTo = null;
+    }
 
     /// Side to move resigns (vs AI: the human resigns).
     public void Resign()

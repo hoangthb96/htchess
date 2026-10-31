@@ -30,6 +30,11 @@
                 </div>
             </div>
         }
+        <div class="eval-bar" title="Đánh giá của máy (+ trắng / − đen)">
+            <div class="eval-fill" style="height:@(EvalPct())%"></div>
+            <span class="eval-num">@EvalText()</span>
+        </div>
+
         @if (_aiThinking)
         {
             <div class="ai-badge">Máy đang nghĩ…</div>
@@ -92,6 +97,7 @@
         <div class="btn-row">
             <button class="btn btn-outline-secondary" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)">Hoàn nước</button>
             <button class="btn btn-outline-secondary" @onclick="Flip">Xoay bàn</button>
+            <button class="btn btn-outline-secondary" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">⧉ PGN</button>
         </div>
 
         <div class="captured">
@@ -163,6 +169,20 @@
     private string _fenInput = "";
     private bool _fenError;
     private int CurPly => _viewPly < 0 ? _session.PlyCount : _viewPly;
+
+    // eval bar: white win% mapped from centipawns
+    private int EvalPct()
+    {
+        var cp = SimpleAi.EvaluateBoard(_session.Position);
+        var pct = 50 + cp / 40.0; // ±2000cp -> 0..100
+        return (int)Math.Clamp(pct, 2, 98);
+    }
+    private string EvalText()
+    {
+        var cp = SimpleAi.EvaluateBoard(_session.Position);
+        var pawns = cp / 100.0;
+        return pawns >= 0 ? $"+{pawns:0.0}" : $"{pawns:0.0}";
+    }
     // dev cache-bust: per-mount query guarantees a fresh module after edits
     private static readonly string _scriptVer = DateTimeOffset.Now.ToUnixTimeMilliseconds().ToString();
 
@@ -238,6 +258,28 @@
         preFrom = _session.PremoveFrom, preTo = _session.PremoveTo,
         ply = _session.PlyCount, over = _session.IsGameOver,
     });
+
+    [JSInvokable]
+    public async Task RightClicked()
+    {
+        _confirmResign = _confirmDraw = false;
+        _session.ClearSelection();
+        await PushHighlights();
+    }
+
+    [JSInvokable]
+    public async Task NavKey(string dir)
+    {
+        var target = dir switch
+        {
+            "start" => 0,
+            "end" => _session.PlyCount,
+            "prev" => CurPly - 1,
+            "next" => CurPly + 1,
+            _ => CurPly,
+        };
+        await ViewPly(target);
+    }
 
     [JSInvokable]
     public async Task SquareClicked(string square)
@@ -469,6 +511,26 @@
     {
         _flipped = !_flipped;
         await Js("flipBoard");
+    }
+
+    private string Pgn()
+    {
+        var sb = new System.Text.StringBuilder();
+        var hist = _session.History;
+        for (var i = 0; i < hist.Count; i++)
+        {
+            if (i % 2 == 0) sb.Append(i / 2 + 1).Append(". ");
+            sb.Append(hist[i].San).Append(' ');
+        }
+        sb.Append(_session.ResultTag ?? "*");
+        return sb.ToString();
+    }
+
+    private async Task CopyPgn()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Pgn()); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
     }
 
     private static readonly Dictionary<char, string> Glyphs = new()
