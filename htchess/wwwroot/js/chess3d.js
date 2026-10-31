@@ -710,4 +710,5 @@ export function _state() {
 }
 
 // bridge for debugging & legacy callers (primary path is IJSObjectReference)
-globalThis.chess3d = { initScene, setPieces, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state };
+globalThis.chess3d = { initScene, setPieces, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state,
+    _setupFen: (fen) => dotNet?.invokeMethodAsync('DebugSetupFen', fen) };

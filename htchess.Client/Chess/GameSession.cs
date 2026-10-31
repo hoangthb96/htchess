@@ -18,6 +18,8 @@ public sealed class GameSession
     // (ChessLib's IsRepetition fires at 2-fold, a search heuristic; State.Key is
     // the pre-move key, so key on FEN fields 1-4 instead)
     private readonly Dictionary<string, int> _repCount = new();
+    // FEN after every ply (index 0 = start position) for move navigation
+    private readonly List<string> _fens = new();
 
     public GameMode Mode { get; private set; } = GameMode.TwoPlayer;
     public bool HumanIsWhite { get; private set; } = true;
@@ -34,6 +36,7 @@ public sealed class GameSession
     public GameSession()
     {
         _game.NewGame();
+        _fens.Add(Pos.FenNotation);
         TrackPosition();
         RefreshLegal();
     }
@@ -55,11 +58,16 @@ public sealed class GameSession
     public IReadOnlyList<(Move Move, string San)> History => _history.Select(h => (h.Move, h.San)).ToList();
     public int PlyCount => _history.Count;
 
-    public void NewGame(GameMode mode, bool humanIsWhite)
+    public void NewGame(GameMode mode, bool humanIsWhite) => ResetTo(mode, humanIsWhite, null);
+
+    /// Start a game from a FEN string (setup positions / takeback experiments).
+    public void NewGameFromFen(string fen, GameMode mode, bool humanIsWhite) => ResetTo(mode, humanIsWhite, fen);
+
+    private void ResetTo(GameMode mode, bool humanIsWhite, string? fen)
     {
         Mode = mode;
         HumanIsWhite = humanIsWhite;
-        _game.NewGame();
+        if (fen is null) _game.NewGame(); else _game.NewGame(fen);
         _history.Clear();
         Selected = null;
         SelectedTargets.Clear();
@@ -69,9 +77,41 @@ public sealed class GameSession
         IsGameOver = false;
         GameOverReason = null;
         ResultTag = null;
+        _fens.Clear();
+        _fens.Add(Pos.FenNotation);
         _repCount.Clear();
         TrackPosition();
         RefreshLegal();
+    }
+
+    /// Piece list of the position after ply `ply` (0 = start). For move navigation.
+    public List<PieceDto> PiecesAt(int ply) => ParseFenBoard(_fens[Math.Clamp(ply, 0, _fens.Count - 1)]);
+
+    /// Displayed from/to of the move at history index `plyIndex` (castle = king squares).
+    public (string From, string To)? MoveSquaresOf(int plyIndex)
+    {
+        if (plyIndex < 0 || plyIndex >= _history.Count) return null;
+        var m = _history[plyIndex].Move;
+        return (m.FromSquare().ToString(), CastleKingDest(m) ?? m.ToSquare().ToString());
+    }
+
+    private static List<PieceDto> ParseFenBoard(string fen)
+    {
+        var list = new List<PieceDto>(32);
+        var rows = fen.Split(' ')[0].Split('/');
+        for (var r = 0; r < 8; r++)
+        {
+            var file = 0;
+            foreach (var ch in rows[r])
+            {
+                if (char.IsDigit(ch)) { file += ch - '0'; continue; }
+                var sq = $"{(char)('a' + file)}{8 - r}";
+                list.Add(new PieceDto(sq, char.ToUpperInvariant(ch).ToString(),
+                    char.IsUpper(ch) ? "w" : "b"));
+                file++;
+            }
+        }
+        return list;
     }
 
     private string PosKey => string.Join(' ', Pos.FenNotation.Split(' ').Take(4));
@@ -398,6 +438,7 @@ public sealed class GameSession
         var st = new State();
         Pos.MakeMove(move, in st);
         TrackPosition();
+        _fens.Add(Pos.FenNotation);
         _history.Add((move, st, san));
         LastFrom = move.FromSquare().ToString();
         LastTo = kingDest;
@@ -426,10 +467,13 @@ public sealed class GameSession
     public void Undo()
     {
         var plies = Mode == GameMode.VsAi ? 2 : 1;
+        var removed = 0;
         for (var i = 0; i < plies && _history.Count > 0; i++)
         {
             var (move, _, _) = _history[^1];
             _history.RemoveAt(_history.Count - 1);
+            _fens.RemoveAt(_fens.Count - 1);
+            removed++;
             UntrackPosition(); // the position we are leaving
             Pos.TakeMove(move);
         }

@@ -103,13 +103,45 @@
             @{ var hist = _session.History; }
             @for (var i = 0; i < hist.Count; i += 2)
             {
+                var w = i; var b = i + 1;
                 <div class="move-pair">
                     <span class="move-no">@(i / 2 + 1).</span>
-                    <span class="move-san">@hist[i].San</span>
-                    <span class="move-san">@(i + 1 < hist.Count ? hist[i + 1].San : "")</span>
+                    <span class="move-san @(_viewPly == w + 1 ? "cur" : "")" @onclick="() => ViewPly(w + 1)">@hist[i].San</span>
+                    <span class="move-san @(_viewPly == b + 1 ? "cur" : "")" @onclick="() => { if (b < hist.Count) _ = ViewPly(b + 1); }">@(b < hist.Count ? hist[b].San : "")</span>
                 </div>
             }
         </div>
+        <div class="btn-row nav-row">
+            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(0)" disabled="@(_session.PlyCount == 0)" title="Đầu ván">⏮</button>
+            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(CurPly - 1)" disabled="@(CurPly <= 0)" title="Lùi">◀</button>
+            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(CurPly + 1)" disabled="@(CurPly >= _session.PlyCount)" title="Tới">▶</button>
+            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(_session.PlyCount)" disabled="@(_viewPly < 0)" title="Mới nhất">⏭</button>
+            @if (_viewPly >= 0)
+            {
+                <span class="hint">đang xem nước @_viewPly</span>
+            }
+        </div>
+
+        <label class="field">
+            Máy
+            <select @bind="_aiDepth" class="form-select">
+                <option value="1">Yếu (depth 1)</option>
+                <option value="2">Vừa (depth 2)</option>
+                <option value="3">Khá (depth 3)</option>
+            </select>
+        </label>
+        <label class="field">
+            Dàn thế cờ (FEN)
+            <input class="form-control form-control-sm" @bind="_fenInput" placeholder="để trống = bàn đầu" />
+        </label>
+        @if (!string.IsNullOrEmpty(_fenInput))
+        {
+            <button class="btn btn-outline-secondary" @onclick="SetupFen">Dàn cờ</button>
+        }
+        @if (_fenError)
+        {
+            <div class="hint">FEN không hợp lệ.</div>
+        }
     </div>
 </div>
 
@@ -126,6 +158,11 @@
     private bool _confirmResign;
     private bool _confirmDraw;
     private bool _drawDeclined;
+    private int _aiDepth = 3;
+    private int _viewPly = -1; // -1 = live board, >=0 = reviewing that ply
+    private string _fenInput = "";
+    private bool _fenError;
+    private int CurPly => _viewPly < 0 ? _session.PlyCount : _viewPly;
     // dev cache-bust: per-mount query guarantees a fresh module after edits
     private static readonly string _scriptVer = DateTimeOffset.Now.ToUnixTimeMilliseconds().ToString();
 
@@ -205,6 +242,7 @@
     [JSInvokable]
     public async Task SquareClicked(string square)
     {
+        if (_viewPly >= 0) return; // board is read-only while reviewing
         var outcome = _session.Click(square);
         _confirmResign = _confirmDraw = false;
         switch (outcome.Result)
@@ -239,6 +277,7 @@
 
     private async Task AfterMove(AppliedMove m)
     {
+        _viewPly = -1; // new move jumps back to live position
         _clockStarted = true;
         // increment goes to the side that just moved (opposite of side to move now)
         if (ClockOn) { if (_session.WhiteToMove) _blackMs += _incMs; else _whiteMs += _incMs; }
@@ -264,7 +303,7 @@
         if (_session.Mode != GameMode.VsAi || _session.SideToMoveIsHuman || _session.IsGameOver) { await TryPremove(); return; }
         _aiThinking = true;
         StateHasChanged();
-        var move = await _ai.FindBestAsync(_session.Position, 3);
+        var move = await _ai.FindBestAsync(_session.Position, _aiDepth);
         _aiThinking = false;
         if (move is not null && !_session.IsGameOver)
         {
@@ -285,21 +324,78 @@
 
     private async Task SyncBoard()
     {
-        var pieces = _session.GetPosition().Select(p => new { square = p.Square, type = p.Type, color = p.Color });
-        await Js("setPieces", pieces);
+        _viewPly = -1;
+        await SyncPieces();
         await PushHighlights();
         await MaybeAiMove();
     }
 
+    private async Task SyncPieces()
+    {
+        var pieces = _session.GetPosition().Select(p => new { square = p.Square, type = p.Type, color = p.Color });
+        await Js("setPieces", pieces);
+    }
+
+    /// Show the board as of ply `ply` (-1/PlyCount = live). Read-only while viewing.
+    private async Task ViewPly(int ply)
+    {
+        _viewPly = ply >= _session.PlyCount ? -1 : Math.Max(0, ply);
+        if (_viewPly >= 0)
+        {
+            var pieces = _session.PiecesAt(_viewPly).Select(p => new { square = p.Square, type = p.Type, color = p.Color });
+            await Js("setPieces", pieces);
+        }
+        else await SyncPieces();
+        await PushHighlights();
+    }
+
+    private async Task SetupFen()
+    {
+        _fenError = false;
+        try
+        {
+            var (mode, humanWhite) = _modePick switch
+            {
+                "ai-w" => (GameMode.VsAi, true),
+                "ai-b" => (GameMode.VsAi, false),
+                _ => (GameMode.TwoPlayer, true),
+            };
+            _session.NewGameFromFen(_fenInput.Trim(), mode, humanWhite);
+        }
+        catch (Exception) { _fenError = true; return; }
+        _confirmResign = _confirmDraw = _drawDeclined = false;
+        ResetClock();
+        _flipped = _session.Mode == GameMode.VsAi && !_session.HumanIsWhite;
+        await Js("setOrientation", !_flipped);
+        await SyncBoard();
+    }
+
+    [JSInvokable]
+    public async Task DebugSetupFen(string fen)
+    {
+        _fenInput = fen;
+        await SetupFen();
+    }
+
     private async Task PushHighlights()
     {
+        string[]? lastMove = null;
+        if (_viewPly > 0)
+        {
+            var ms = _session.MoveSquaresOf(_viewPly - 1);
+            if (ms is not null) lastMove = new[] { ms.Value.From, ms.Value.To };
+        }
+        else if (_viewPly < 0 && _session.LastFrom is not null)
+            lastMove = new[] { _session.LastFrom, _session.LastTo! };
         await Js("setHighlights", new
         {
-            selected = _session.Selected,
-            targets = _session.SelectedTargets,
-            check = _session.CheckedKingSquare(),
-            lastMove = _session.LastFrom is null ? null : new[] { _session.LastFrom, _session.LastTo! },
-            premove = _session.PremoveFrom is null ? null : new[] { _session.PremoveFrom, _session.PremoveTo }.Where(x => x is not null).ToArray(),
+            selected = _viewPly < 0 ? _session.Selected : null,
+            targets = _viewPly < 0 ? _session.SelectedTargets.ToArray() : Array.Empty<string>(),
+            check = _viewPly < 0 ? _session.CheckedKingSquare() : null,
+            lastMove,
+            premove = _viewPly < 0 && _session.PremoveFrom is not null
+                ? new[] { _session.PremoveFrom, _session.PremoveTo }.Where(x => x is not null).ToArray()
+                : null,
         });
         StateHasChanged();
     }
@@ -322,14 +418,20 @@
         };
         _session.NewGame(mode, humanWhite);
         _confirmResign = _confirmDraw = _drawDeclined = false;
-        var (start, inc) = ParseTc(_tcPick);
-        _whiteMs = _blackMs = start; _incMs = inc;
-        _lastTick = DateTime.UtcNow;
-        _clockStarted = false; // clock starts on the first move
+        _fenError = false;
+        ResetClock();
         // vs AI the human always sits at the bottom
         _flipped = mode == GameMode.VsAi && !humanWhite;
         await Js("setOrientation", !_flipped);
         await SyncBoard();
+    }
+
+    private void ResetClock()
+    {
+        var (start, inc) = ParseTc(_tcPick);
+        _whiteMs = _blackMs = start; _incMs = inc;
+        _lastTick = DateTime.UtcNow;
+        _clockStarted = false; // clock starts on the first move
     }
 
     private static (double start, double inc) ParseTc(string tc) => tc switch

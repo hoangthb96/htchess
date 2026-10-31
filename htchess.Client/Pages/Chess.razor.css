@@ -67,6 +67,11 @@
 }
 .move-pair:nth-child(odd) { background: rgba(255,255,255,0.05); }
 .move-no { opacity: 0.6; }
+.move-san { cursor: pointer; border-radius: 3px; padding: 0 0.2rem; }
+.move-san:hover { background: rgba(255,255,255,0.12); }
+.move-san.cur { background: #3a5d34; font-weight: 700; }
+
+.nav-row .btn { padding: 0.15rem 0.55rem; font-size: 0.85rem; }
 
 .promo-overlay {
     position: absolute;
