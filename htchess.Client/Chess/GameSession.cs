@@ -14,6 +14,10 @@ public sealed class GameSession
     private readonly IGame _game = GameFactory.Create();
     private readonly List<(Move Move, State State, string San)> _history = new();
     private readonly List<Move> _legal = new();
+    // position-key -> occurrence count, for a true threefold check
+    // (ChessLib's IsRepetition fires at 2-fold, a search heuristic; State.Key is
+    // the pre-move key, so key on FEN fields 1-4 instead)
+    private readonly Dictionary<string, int> _repCount = new();
 
     public GameMode Mode { get; private set; } = GameMode.TwoPlayer;
     public bool HumanIsWhite { get; private set; } = true;
@@ -30,6 +34,7 @@ public sealed class GameSession
     public GameSession()
     {
         _game.NewGame();
+        TrackPosition();
         RefreshLegal();
     }
 
@@ -42,6 +47,11 @@ public sealed class GameSession
     public bool IsCheck => Pos.InCheck;
     public bool IsGameOver { get; private set; }
     public string? GameOverReason { get; private set; }
+    /// "1-0", "0-1", "½-½" or null while playing.
+    public string? ResultTag { get; private set; }
+
+    public string? PremoveFrom { get; private set; }
+    public string? PremoveTo { get; private set; }
     public IReadOnlyList<(Move Move, string San)> History => _history.Select(h => (h.Move, h.San)).ToList();
     public int PlyCount => _history.Count;
 
@@ -55,9 +65,21 @@ public sealed class GameSession
         SelectedTargets.Clear();
         LastFrom = LastTo = null;
         _pendingPromoFrom = _pendingPromoTo = null;
+        PremoveFrom = PremoveTo = null;
         IsGameOver = false;
         GameOverReason = null;
+        ResultTag = null;
+        _repCount.Clear();
+        TrackPosition();
         RefreshLegal();
+    }
+
+    private string PosKey => string.Join(' ', Pos.FenNotation.Split(' ').Take(4));
+    private void TrackPosition() => _repCount[PosKey] = _repCount.GetValueOrDefault(PosKey) + 1;
+    private void UntrackPosition()
+    {
+        var k = PosKey;
+        if (_repCount.TryGetValue(k, out var n)) _repCount[k] = n - 1;
     }
 
     private void RefreshLegal()
@@ -75,22 +97,58 @@ public sealed class GameSession
     {
         if (_legal.Count == 0)
         {
-            IsGameOver = true;
-            GameOverReason = Pos.InCheck
+            End(Pos.InCheck
                 ? (WhiteToMove ? "Chiếu hết — Đen thắng" : "Chiếu hết — Trắng thắng")
-                : "Hòa — hết nước đi (stalemate)";
+                : "Hòa — hết nước đi (stalemate)",
+                Pos.InCheck ? (WhiteToMove ? "0-1" : "1-0") : "½-½");
         }
-        else if (Pos.IsRepetition || Pos.Rule50 >= 100)
+        else if (_repCount.GetValueOrDefault(PosKey) >= 3)
         {
-            IsGameOver = true;
-            GameOverReason = "Hòa — lặp nước / luật 50 nước";
+            End("Hòa — lặp nước 3 lần", "½-½");
+        }
+        else if (Pos.Rule50 >= 100)
+        {
+            End("Hòa — luật 50 nước", "½-½");
+        }
+        else if (InsufficientMaterial())
+        {
+            End("Hòa — không đủ quân chiếu hết", "½-½");
         }
         else
         {
             IsGameOver = false;
             GameOverReason = null;
+            ResultTag = null;
         }
     }
+
+    private void End(string reason, string tag)
+    {
+        IsGameOver = true;
+        GameOverReason = reason;
+        ResultTag = tag;
+        Selected = null;
+        SelectedTargets.Clear();
+        PremoveFrom = PremoveTo = null;
+        _pendingPromoFrom = _pendingPromoTo = null;
+    }
+
+    /// Lichess-style: K vs K, K+minor vs K, or bishops-only on same colour.
+    private bool InsufficientMaterial()
+    {
+        var minors = new List<PieceDto>();
+        foreach (var p in GetPosition())
+        {
+            if (p.Type is "P" or "R" or "Q") return false;
+            if (p.Type != "K") minors.Add(p);
+        }
+        if (minors.Count == 0) return true;
+        if (minors.Count == 1) return true;
+        return minors.All(p => p.Type == "B") &&
+               minors.Select(p => SqColor(p.Square)).Distinct().Count() == 1;
+    }
+
+    private static int SqColor(string sq) => (sq[0] - 'a' + sq[1] - '1') & 1;
 
     public bool SideToMoveIsHuman => Mode == GameMode.TwoPlayer || WhiteToMove == HumanIsWhite;
 
@@ -127,25 +185,50 @@ public sealed class GameSession
     /// Handle a board click. Returns what the UI should do.
     public ClickOutcome Click(string squareName)
     {
-        if (IsGameOver || !SideToMoveIsHuman) return new(ClickResult.Ignored);
+        if (IsGameOver || AwaitingPromotion) return new(ClickResult.Ignored);
         Square sq = squareName;
+        var piece = Pos.GetPiece(sq);
 
-        // pending promotion: only the picker resolves it
-        if (AwaitingPromotion) return new(ClickResult.Ignored);
+        // premove path: vs AI while the machine is thinking
+        if (!SideToMoveIsHuman)
+        {
+            var ownHuman = piece != Piece.EmptyPiece && piece.ColorOf().IsWhite == HumanIsWhite;
+            if (PremoveFrom is not null && PremoveTo is null && squareName != PremoveFrom)
+            {
+                PremoveTo = squareName;
+                return new(ClickResult.PremoveSet);
+            }
+            if (ownHuman)
+            {
+                PremoveFrom = PremoveFrom == squareName ? null : squareName;
+                PremoveTo = null;
+                return new(ClickResult.PremoveSelect);
+            }
+            PremoveFrom = PremoveTo = null;
+            return new(ClickResult.Ignored);
+        }
+
+        // human's turn now: a half-entered premove resolves as a normal move
+        if (PremoveFrom is not null)
+        {
+            var from = PremoveFrom;
+            PremoveFrom = PremoveTo = null;
+            if (squareName != from && FindCandidates(from, squareName).Count > 0)
+                return TryCommit(from, squareName, null);
+        }
 
         // clicked a legal target of current selection
         if (Selected is not null && SelectedTargets.Contains(squareName))
             return TryCommit(Selected, squareName, null);
 
         // clicked own piece -> select
-        var piece = Pos.GetPiece(sq);
         if (piece != Piece.EmptyPiece && piece.ColorOf().IsWhite == WhiteToMove)
         {
             Selected = squareName;
             SelectedTargets.Clear();
             SelectedTargets.AddRange(_legal
                 .Where(m => m.FromSquare().ToString() == squareName)
-                .Select(m => m.ToSquare().ToString())
+                .Select(DisplayTarget)
                 .Distinct());
             return new(ClickResult.Selected);
         }
@@ -153,6 +236,107 @@ public sealed class GameSession
         Selected = null;
         SelectedTargets.Clear();
         return new(ClickResult.Deselected);
+    }
+
+    /// After the opponent moves, fire the queued premove if still legal.
+    /// Returns the applied move, or null when the premove is illegal now.
+    public AppliedMove? TryPlayPremove()
+    {
+        if (PremoveFrom is null) return null;
+        var from = PremoveFrom; var to = PremoveTo;
+        PremoveFrom = PremoveTo = null;
+        if (!SideToMoveIsHuman || IsGameOver) return null;
+
+        // half-entered premove: keep the piece selected so the destination click plays it
+        if (to is null)
+        {
+            Selected = from;
+            SelectedTargets.Clear();
+            SelectedTargets.AddRange(_legal
+                .Where(m => m.FromSquare().ToString() == from)
+                .Select(DisplayTarget)
+                .Distinct());
+            return null;
+        }
+
+        var candidates = FindCandidates(from, to);
+        if (candidates.Count == 0) return null;
+        // lichess premoves auto-promote to queen
+        var move = candidates.Any(m => m.IsPromotionMove())
+            ? candidates.First(m => m.PromotedPieceType() == PieceTypes.Queen)
+            : candidates[0];
+        return ApplyMove(move);
+    }
+
+    /// ChessLib encodes castling as king->rook square (e1h1). Display/accept the
+    /// king's destination square (g1) like lichess instead.
+    private static string? CastleKingDest(Move m)
+    {
+        if (!m.IsCastleMove()) return null;
+        var rook = m.ToSquare();
+        return (rook.FileChar == 'h' ? "g" : "c") + rook.RankChar.ToString();
+    }
+
+    /// Square shown as a target dot (and accepted as a click) for a move.
+    private static string DisplayTarget(Move m) => CastleKingDest(m) ?? m.ToSquare().ToString();
+
+    private List<Move> FindCandidates(string from, string to) => _legal
+        .Where(m => m.FromSquare().ToString() == from && DisplayTarget(m) == to)
+        .ToList();
+
+    /// Side to move resigns (vs AI: the human resigns).
+    public void Resign()
+    {
+        if (IsGameOver) return;
+        var resignerWhite = Mode == GameMode.VsAi ? HumanIsWhite : WhiteToMove;
+        End(resignerWhite ? "Trắng đầu hàng — Đen thắng" : "Đen đầu hàng — Trắng thắng",
+            resignerWhite ? "0-1" : "1-0");
+    }
+
+    /// Draw request. 2P: agreement (always accepted). vs AI: accepted unless the AI is better.
+    public bool OfferDraw()
+    {
+        if (IsGameOver) return false;
+        if (Mode == GameMode.TwoPlayer || !AiIsWinning())
+        {
+            End("Hòa — hai bên đồng ý", "½-½");
+            return true;
+        }
+        return false;
+    }
+
+    private bool AiIsWinning()
+    {
+        // Evaluate is side-to-move relative; ask whether the AI is ahead.
+        var aiIsWhite = !HumanIsWhite;
+        var score = SimpleAi.EvaluateBoard(Pos); // + favors white
+        return aiIsWhite ? score > 100 : score < -100;
+    }
+
+    /// Clock flag fell. whiteFlagged = white ran out of time.
+    public void Flag(bool whiteFlagged)
+    {
+        if (IsGameOver) return;
+        var winnerCanMate = SideHasMatingMaterial(!whiteFlagged);
+        if (winnerCanMate)
+            End(whiteFlagged ? "Trắng hết giờ — Đen thắng" : "Đen hết giờ — Trắng thắng",
+                whiteFlagged ? "0-1" : "1-0");
+        else
+            End("Hết giờ — hòa (đối phương không đủ quân chiếu hết)", "½-½");
+    }
+
+    private bool SideHasMatingMaterial(bool white)
+    {
+        var minors = 0;
+        foreach (var p in GetPosition())
+        {
+            if (p.Color == (white ? "w" : "b"))
+            {
+                if (p.Type is "P" or "R" or "Q") return true;
+                if (p.Type != "K") minors++;
+            }
+        }
+        return minors >= 2; // two minors can still deliver mate (bare king vs K+NN is possible)
     }
 
     /// Picker answered with promo type char: 'Q','R','B','N'.
@@ -166,9 +350,7 @@ public sealed class GameSession
 
     private ClickOutcome TryCommit(string from, string to, string? promo)
     {
-        var candidates = _legal
-            .Where(m => m.FromSquare().ToString() == from && m.ToSquare().ToString() == to)
-            .ToList();
+        var candidates = FindCandidates(from, to);
         if (candidates.Count == 0) return new(ClickResult.Ignored);
 
         if (candidates.Any(m => m.IsPromotionMove()))
@@ -199,24 +381,30 @@ public sealed class GameSession
     public AppliedMove ApplyMove(Move move)
     {
         var san = MoveNotation.Create(Pos).ToNotation(MoveNotations.San).Convert(move);
+        // ChessLib emits "ep" + from-file + to ("eped6"); real SAN is "exd6"
+        if (move.IsEnPassantMove() && san.Length > 3 && san.StartsWith("ep"))
+            san = san[2] + "x" + san[3..];
         var captured = CapturedSquareOf(move);
         string? rookFrom = null, rookTo = null;
+        // ChessLib encodes castle as king->rook square; the king's real landing is g/c file
+        var kingDest = CastleKingDest(move) ?? move.ToSquare().ToString();
         if (move.IsCastleMove())
         {
-            var to = move.ToSquare();
-            var kingSide = to.FileChar == 'g';
-            rookFrom = (kingSide ? "h" : "a") + to.RankChar;
-            rookTo = (kingSide ? "f" : "d") + to.RankChar;
+            var rook = move.ToSquare();
+            var kingSide = rook.FileChar == 'h';
+            rookFrom = rook.ToString();
+            rookTo = (kingSide ? "f" : "d") + rook.RankChar.ToString();
         }
         var st = new State();
         Pos.MakeMove(move, in st);
+        TrackPosition();
         _history.Add((move, st, san));
         LastFrom = move.FromSquare().ToString();
-        LastTo = move.ToSquare().ToString();
+        LastTo = kingDest;
         RefreshLegal();
 
         return new AppliedMove(
-            LastFrom, LastTo,
+            LastFrom, kingDest,
             CapturedSquare: captured,
             RookFrom: rookFrom,
             RookTo: rookTo,
@@ -225,6 +413,7 @@ public sealed class GameSession
 
     private string? CapturedSquareOf(Move move)
     {
+        if (move.IsCastleMove()) return null; // "to" is own rook, not a victim
         var to = move.ToSquare();
         if (move.IsEnPassantMove())
             return "" + to.FileChar + move.FromSquare().RankChar;
@@ -241,11 +430,12 @@ public sealed class GameSession
         {
             var (move, _, _) = _history[^1];
             _history.RemoveAt(_history.Count - 1);
+            UntrackPosition(); // the position we are leaving
             Pos.TakeMove(move);
         }
         var hasLast = _history.Count > 0;
         LastFrom = hasLast ? _history[^1].Move.FromSquare().ToString() : null;
-        LastTo = hasLast ? _history[^1].Move.ToSquare().ToString() : null;
+        LastTo = hasLast ? (CastleKingDest(_history[^1].Move) ?? _history[^1].Move.ToSquare().ToString()) : null;
         Selected = null;
         SelectedTargets.Clear();
         _pendingPromoFrom = _pendingPromoTo = null;

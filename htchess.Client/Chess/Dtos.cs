@@ -2,7 +2,7 @@ namespace htchess.Client.Chess;
 
 public enum GameMode { TwoPlayer, VsAi }
 
-public enum ClickResult { Ignored, Selected, Deselected, NeedsPromotion, MoveApplied }
+public enum ClickResult { Ignored, Selected, Deselected, NeedsPromotion, MoveApplied, PremoveSelect, PremoveSet }
 
 public record PieceDto(string Square, string Type, string Color);
 

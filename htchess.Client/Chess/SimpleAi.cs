@@ -116,6 +116,13 @@ public sealed class SimpleAi
         return pos.SideToMove.IsWhite ? score : -score;
     }
 
+    /// White-relative static score in centipawns (+ favors white).
+    public static int EvaluateBoard(IPosition pos)
+    {
+        var stm = Evaluate(pos);
+        return pos.SideToMove.IsWhite ? stm : -stm;
+    }
+
     private int OrderScore(IPosition pos, Move m)
     {
         var victim = pos.GetPiece(m.ToSquare());

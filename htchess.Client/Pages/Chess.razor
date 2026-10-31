@@ -10,6 +10,12 @@
     <div class="board-area">
         <canvas @ref="_canvas" class="board-canvas"></canvas>
 
+        @if (ClockOn)
+        {
+            <div class="clock @(TopClockHot ? "hot" : "")" style="top: 0.6rem;">@Fmt(TopMs)</div>
+            <div class="clock @(BottomClockHot ? "hot" : "")" style="bottom: 0.6rem;">@Fmt(BottomMs)</div>
+        }
+
         @if (_session.AwaitingPromotion)
         {
             <div class="promo-overlay">
@@ -28,6 +34,16 @@
         {
             <div class="ai-badge">Máy đang nghĩ…</div>
         }
+        @if (_session.IsGameOver)
+        {
+            <div class="end-overlay">
+                <div class="end-box">
+                    <div class="end-result">@_session.ResultTag</div>
+                    <div class="end-reason">@_session.GameOverReason</div>
+                    <button class="btn btn-primary" @onclick="NewGame">Chơi lại</button>
+                </div>
+            </div>
+        }
     </div>
 
     <div class="side-panel">
@@ -42,17 +58,45 @@
             </select>
         </label>
 
+        <label class="field">
+            Thời gian
+            <select @bind="_tcPick" class="form-select">
+                <option value="none">Không giờ</option>
+                <option value="1+0">1+0 siêu chớp</option>
+                <option value="3+0">3+0 chớp</option>
+                <option value="3+2">3+2 chớp</option>
+                <option value="5+0">5+0 chớp</option>
+                <option value="5+3">5+3 chớp</option>
+                <option value="10+0">10+0 nhanh</option>
+            </select>
+        </label>
+
         <div class="status">@StatusText()</div>
 
         <div class="btn-row">
             <button class="btn btn-primary" @onclick="NewGame">Ván mới</button>
-            <button class="btn btn-outline-secondary" @onclick="Undo" disabled="@(_session.PlyCount == 0)">Hoàn nước</button>
+            <button class="btn @(_confirmResign ? "btn-danger" : "btn-outline-secondary")"
+                    @onclick="ResignClick" disabled="@_session.IsGameOver">
+                @(_confirmResign ? "Xác nhận đầu hàng" : "⚑ Đầu hàng")
+            </button>
+            <button class="btn @(_confirmDraw ? "btn-warning" : "btn-outline-secondary")"
+                    @onclick="DrawClick" disabled="@_session.IsGameOver">
+                @(_confirmDraw ? "Xác nhận hòa" : "½ Cầu hòa")
+            </button>
+        </div>
+        @if (_drawDeclined)
+        {
+            <div class="hint">Máy từ chối hòa.</div>
+        }
+
+        <div class="btn-row">
+            <button class="btn btn-outline-secondary" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)">Hoàn nước</button>
             <button class="btn btn-outline-secondary" @onclick="Flip">Xoay bàn</button>
         </div>
 
         <div class="captured">
-            <div>Trắng bắt: @string.Join(" ", _session.CapturedByWhite().Select(Sym))</div>
-            <div>Đen bắt: @string.Join(" ", _session.CapturedByBlack().Select(Sym))</div>
+            <div>Trắng bắt: @string.Join(" ", _session.CapturedByWhite().Select(Sym))@(MaterialDiff() > 0 ? $" +{MaterialDiff()}" : "")</div>
+            <div>Đen bắt: @string.Join(" ", _session.CapturedByBlack().Select(Sym))@(MaterialDiff() < 0 ? $" +{-MaterialDiff()}" : "")</div>
         </div>
 
         <div class="movelist">
@@ -76,16 +120,70 @@
     private readonly GameSession _session = new();
     private readonly SimpleAi _ai = new();
     private string _modePick = "2p";
+    private string _tcPick = "none";
     private bool _aiThinking;
+    private bool _flipped;
+    private bool _confirmResign;
+    private bool _confirmDraw;
+    private bool _drawDeclined;
     // dev cache-bust: per-mount query guarantees a fresh module after edits
     private static readonly string _scriptVer = DateTimeOffset.Now.ToUnixTimeMilliseconds().ToString();
+
+    // ---- clock state (ms remaining per side) ----
+    private double _whiteMs, _blackMs, _incMs;
+    private DateTime _lastTick;
+    private bool _clockStarted;
+    private PeriodicTimer? _clockTimer;
+
+    private bool ClockOn => _tcPick != "none";
+    private int TopMs => (int)Math.Max(0, _flipped ? _whiteMs : _blackMs);
+    private int BottomMs => (int)Math.Max(0, _flipped ? _blackMs : _whiteMs);
+    private bool TopClockHot => ClockOn && !_session.IsGameOver && _clockStarted && _session.WhiteToMove == _flipped;
+    private bool BottomClockHot => ClockOn && !_session.IsGameOver && _clockStarted && _session.WhiteToMove == !_flipped;
+
+    private static string Fmt(int ms)
+    {
+        var t = TimeSpan.FromMilliseconds(ms);
+        return t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}:{t.Seconds:00}"
+             : $"{t.Seconds}.{t.Milliseconds / 100}";
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./js/chess3d.js?v={_scriptVer}");
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./js/chess3d.js?v={_scriptVer}");
+        }
+        catch (JSException) { return; }
         _dotNet = DotNetObjectReference.Create(this);
         await Js("initScene", _canvas, _dotNet);
+        _ = RunClock();
+    }
+
+    private async Task RunClock()
+    {
+        _clockTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+        _lastTick = DateTime.UtcNow;
+        try
+        {
+            while (await _clockTimer.WaitForNextTickAsync())
+            {
+                var now = DateTime.UtcNow;
+                var elapsed = (now - _lastTick).TotalMilliseconds;
+                _lastTick = now;
+                if (!ClockOn || _session.IsGameOver || !_clockStarted) continue;
+                if (_session.WhiteToMove) _whiteMs -= elapsed; else _blackMs -= elapsed;
+                if (_whiteMs <= 0 || _blackMs <= 0)
+                {
+                    _session.Flag(_whiteMs <= 0);
+                    await Js("playSound", "end");
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (JSDisconnectedException) { }
     }
 
     [JSInvokable]
@@ -95,13 +193,32 @@
     }
 
     [JSInvokable]
+    public string DebugState() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        mode = _session.Mode.ToString(), humanWhite = _session.HumanIsWhite,
+        whiteToMove = _session.WhiteToMove, stmHuman = _session.SideToMoveIsHuman,
+        selected = _session.Selected, targets = _session.SelectedTargets,
+        preFrom = _session.PremoveFrom, preTo = _session.PremoveTo,
+        ply = _session.PlyCount, over = _session.IsGameOver,
+    });
+
+    [JSInvokable]
     public async Task SquareClicked(string square)
     {
         var outcome = _session.Click(square);
+        _confirmResign = _confirmDraw = false;
         switch (outcome.Result)
         {
             case ClickResult.Selected:
+                await Js("playSound", "select");
+                await PushHighlights();
+                break;
             case ClickResult.Deselected:
+                await PushHighlights();
+                break;
+            case ClickResult.PremoveSelect:
+            case ClickResult.PremoveSet:
+                await Js("playSound", "select");
                 await PushHighlights();
                 break;
             case ClickResult.NeedsPromotion:
@@ -122,25 +239,48 @@
 
     private async Task AfterMove(AppliedMove m)
     {
+        _clockStarted = true;
+        // increment goes to the side that just moved (opposite of side to move now)
+        if (ClockOn) { if (_session.WhiteToMove) _blackMs += _incMs; else _whiteMs += _incMs; }
         await Js("applyMove", m.From, m.To,
             new { capturedSquare = m.CapturedSquare, rookFrom = m.RookFrom, rookTo = m.RookTo, promoteTo = m.PromoteTo });
+        await PlayMoveSound(m);
         await PushHighlights();
         await MaybeAiMove();
     }
 
+    private async Task PlayMoveSound(AppliedMove m)
+    {
+        if (_session.IsGameOver) { await Js("playSound", "end"); return; }
+        var kind = m.CapturedSquare is not null ? "capture"
+                 : m.PromoteTo is not null ? "promote"
+                 : m.RookFrom is not null ? "castle" : "move";
+        await Js("playSound", kind);
+        if (_session.IsCheck) await Js("playSound", "check");
+    }
+
     private async Task MaybeAiMove()
     {
-        if (_session.Mode != GameMode.VsAi || _session.SideToMoveIsHuman || _session.IsGameOver) return;
+        if (_session.Mode != GameMode.VsAi || _session.SideToMoveIsHuman || _session.IsGameOver) { await TryPremove(); return; }
         _aiThinking = true;
         StateHasChanged();
         var move = await _ai.FindBestAsync(_session.Position, 3);
         _aiThinking = false;
-        if (move is not null)
+        if (move is not null && !_session.IsGameOver)
         {
             var applied = _session.ApplyMove(move.Value);
             await AfterMove(applied);
+            return;
         }
         StateHasChanged();
+    }
+
+    /// If it's the human's turn and a premove is queued, fire it.
+    private async Task TryPremove()
+    {
+        var applied = _session.TryPlayPremove();
+        if (applied is not null) await AfterMove(applied);
+        else await PushHighlights(); // half premove may have become a normal selection
     }
 
     private async Task SyncBoard()
@@ -159,6 +299,7 @@
             targets = _session.SelectedTargets,
             check = _session.CheckedKingSquare(),
             lastMove = _session.LastFrom is null ? null : new[] { _session.LastFrom, _session.LastTo! },
+            premove = _session.PremoveFrom is null ? null : new[] { _session.PremoveFrom, _session.PremoveTo }.Where(x => x is not null).ToArray(),
         });
         StateHasChanged();
     }
@@ -180,7 +321,40 @@
             _ => (GameMode.TwoPlayer, true),
         };
         _session.NewGame(mode, humanWhite);
+        _confirmResign = _confirmDraw = _drawDeclined = false;
+        var (start, inc) = ParseTc(_tcPick);
+        _whiteMs = _blackMs = start; _incMs = inc;
+        _lastTick = DateTime.UtcNow;
+        _clockStarted = false; // clock starts on the first move
+        // vs AI the human always sits at the bottom
+        _flipped = mode == GameMode.VsAi && !humanWhite;
+        await Js("setOrientation", !_flipped);
         await SyncBoard();
+    }
+
+    private static (double start, double inc) ParseTc(string tc) => tc switch
+    {
+        "1+0" => (60_000, 0), "3+0" => (180_000, 0), "3+2" => (180_000, 2_000),
+        "5+0" => (300_000, 0), "5+3" => (300_000, 3_000), "10+0" => (600_000, 0),
+        _ => (0, 0),
+    };
+
+    private async Task ResignClick()
+    {
+        if (!_confirmResign) { _confirmResign = true; _confirmDraw = false; return; }
+        _confirmResign = false;
+        _session.Resign();
+        await Js("playSound", "end");
+        await PushHighlights();
+    }
+
+    private async Task DrawClick()
+    {
+        if (!_confirmDraw) { _confirmDraw = true; _confirmResign = false; _drawDeclined = false; return; }
+        _confirmDraw = false;
+        if (_session.OfferDraw()) { await Js("playSound", "end"); }
+        else _drawDeclined = true;
+        await PushHighlights();
     }
 
     private async Task Undo()
@@ -189,7 +363,11 @@
         await SyncBoard();
     }
 
-    private async Task Flip() => await Js("flipBoard");
+    private async Task Flip()
+    {
+        _flipped = !_flipped;
+        await Js("flipBoard");
+    }
 
     private static readonly Dictionary<char, string> Glyphs = new()
     {
@@ -198,16 +376,27 @@
     };
     private static string Sym(string t) => Glyphs.TryGetValue(t[0], out var g) ? g : t;
 
+    private static int PieceVal(string t) => char.ToUpperInvariant(t[0]) switch
+    {
+        'Q' => 9, 'R' => 5, 'B' => 3, 'N' => 3, _ => 1,
+    };
+
+    /// Material lead in pawns from white's perspective.
+    private int MaterialDiff() =>
+        _session.CapturedByWhite().Sum(PieceVal) - _session.CapturedByBlack().Sum(PieceVal);
+
     private string StatusText()
     {
         if (_session.IsGameOver) return _session.GameOverReason ?? "Hết ván";
         var side = _session.WhiteToMove ? "Trắng" : "Đen";
         var check = _session.IsCheck ? " — CHIẾU!" : "";
-        return $"Lượt: {side}{check}";
+        var pre = _session.PremoveFrom is not null ? " (premove)" : "";
+        return $"Lượt: {side}{check}{pre}";
     }
 
     public async ValueTask DisposeAsync()
     {
+        _clockTimer?.Dispose();
         await Js("dispose");
         _dotNet?.Dispose();
         if (_module is not null)
