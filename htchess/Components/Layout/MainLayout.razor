@@ -1,15 +1,14 @@
 ﻿@inherits LayoutComponentBase
 
 <div class="page">
+    <input type="checkbox" id="nav-cb" class="nav-cb" title="Navigation menu" />
+    <label for="nav-cb" class="nav-toggle" title="Menu"></label>
+    <label for="nav-cb" class="nav-backdrop"></label>
     <div class="sidebar">
         <NavMenu />
     </div>
 
     <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
         <article class="content px-4">
             @Body
         </article>

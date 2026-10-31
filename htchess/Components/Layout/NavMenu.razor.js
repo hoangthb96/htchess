@@ -6,6 +6,10 @@ if (!customElements.get('nav-menu')) {
             if (toggler?.checked && event.target.closest('.nav-scrollable')) {
                 toggler.checked = false;
             }
+            if (event.target.closest('a.nav-link')) {
+                const cb = document.getElementById('nav-cb');
+                if (cb) cb.checked = false;
+            }
         };
 
         connectedCallback() {
