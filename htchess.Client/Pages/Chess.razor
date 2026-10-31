@@ -1,3 +1,4 @@
+@page "/"
 @page "/chess"
 @rendermode InteractiveWebAssembly
 @implements IAsyncDisposable
@@ -18,8 +19,8 @@
 
         @if (_session.AwaitingPromotion)
         {
-            <div class="promo-overlay">
-                <div class="promo-box">
+            <div class="promo-overlay" @onclick="CancelPromo">
+                <div class="promo-box" @onclick:stopPropagation>
                     <p>Phong cấp thành:</p>
                     <div class="promo-btns">
                         <button @onclick='() => PickPromo("Q")'>♕ Hậu</button>
@@ -32,8 +33,8 @@
         }
         <div class="eval-bar" title="Đánh giá của máy (+ trắng / − đen)">
             <div class="eval-fill" style="height:@(EvalPct())%"></div>
-            <span class="eval-num">@EvalText()</span>
         </div>
+        <span class="eval-num">@EvalText()</span>
 
         @if (_aiThinking)
         {
@@ -52,20 +53,13 @@
     </div>
 
     <div class="side-panel">
-        <h3>htchess</h3>
-
-        <label class="field">
-            Chế độ
-            <select @bind="_modePick" class="form-select">
-                <option value="2p">2 người (hot-seat)</option>
-                <option value="ai-w">Máy — bạn cầm Trắng</option>
-                <option value="ai-b">Máy — bạn cầm Đen</option>
+        <div class="panel-row">
+            <select @bind="_modePick" class="form-select form-select-sm" title="Chế độ">
+                <option value="2p">2 người</option>
+                <option value="ai-w">vs Máy (Trắng)</option>
+                <option value="ai-b">vs Máy (Đen)</option>
             </select>
-        </label>
-
-        <label class="field">
-            Thời gian
-            <select @bind="_tcPick" class="form-select">
+            <select @bind="_tcPick" @bind:after="ResetClock" class="form-select form-select-sm" title="Thời gian">
                 <option value="none">Không giờ</option>
                 <option value="1+0">1+0 siêu chớp</option>
                 <option value="3+0">3+0 chớp</option>
@@ -74,39 +68,48 @@
                 <option value="5+3">5+3 chớp</option>
                 <option value="10+0">10+0 nhanh</option>
             </select>
-        </label>
+        </div>
 
         <div class="status">@StatusText()</div>
 
-        <div class="btn-row">
-            <button class="btn btn-primary" @onclick="NewGame">Ván mới</button>
-            <button class="btn @(_confirmResign ? "btn-danger" : "btn-outline-secondary")"
-                    @onclick="ResignClick" disabled="@_session.IsGameOver">
-                @(_confirmResign ? "Xác nhận đầu hàng" : "⚑ Đầu hàng")
-            </button>
-            <button class="btn @(_confirmDraw ? "btn-warning" : "btn-outline-secondary")"
-                    @onclick="DrawClick" disabled="@_session.IsGameOver">
-                @(_confirmDraw ? "Xác nhận hòa" : "½ Cầu hòa")
-            </button>
+        <div class="icon-row">
+            <button class="ibtn @(_confirmNew ? "ibtn-warn" : "ibtn-primary")" @onclick="NewGameClick" title="Ván mới">✚</button>
+            <button class="ibtn @(_confirmResign ? "ibtn-danger" : "")"
+                    @onclick="ResignClick" disabled="@_session.IsGameOver" title="Đầu hàng">⚑</button>
+            <button class="ibtn @(_confirmDraw ? "ibtn-warn" : "")"
+                    @onclick="DrawClick" disabled="@_session.IsGameOver" title="Cầu hòa">½</button>
+            <button class="ibtn" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)" title="Hoàn nước">↩</button>
+            <button class="ibtn" @onclick="Flip" title="Xoay bàn">⇄</button>
+            <button class="ibtn @(_copied ? "ibtn-ok" : "")" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">@(_copied ? "✓" : "⧉")</button>
         </div>
+        @if (_confirmNew)
+        {
+            <div class="hint">Bấm ✚ lần nữa để bắt đầu ván mới.</div>
+        }
+        @if (_confirmResign)
+        {
+            <div class="hint">Bấm ⚑ lần nữa để xác nhận đầu hàng.</div>
+        }
+        @if (_confirmDraw)
+        {
+            <div class="hint">Bấm ½ lần nữa để xác nhận hòa.</div>
+        }
         @if (_drawDeclined)
         {
             <div class="hint">Máy từ chối hòa.</div>
         }
 
-        <div class="btn-row">
-            <button class="btn btn-outline-secondary" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)">Hoàn nước</button>
-            <button class="btn btn-outline-secondary" @onclick="Flip">Xoay bàn</button>
-            <button class="btn @(_copied ? "btn-success" : "btn-outline-secondary")" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">@(_copied ? "✓ Đã chép" : "⧉ PGN")</button>
-        </div>
-
         <div class="captured">
-            <div>Trắng bắt: @string.Join(" ", _session.CapturedByWhite().Select(Sym))@(MaterialDiff() > 0 ? $" +{MaterialDiff()}" : "")</div>
-            <div>Đen bắt: @string.Join(" ", _session.CapturedByBlack().Select(Sym))@(MaterialDiff() < 0 ? $" +{-MaterialDiff()}" : "")</div>
+            <div><span class="cap-side">Trắng</span> @(CapLine(_session.CapturedByWhite(), MaterialDiff() > 0 ? MaterialDiff() : 0))</div>
+            <div><span class="cap-side">Đen</span> @(CapLine(_session.CapturedByBlack(), MaterialDiff() < 0 ? -MaterialDiff() : 0))</div>
         </div>
 
         <div class="movelist">
             @{ var hist = _session.History; }
+            @if (hist.Count == 0)
+            {
+                <div class="move-empty">Chưa có nước đi</div>
+            }
             @for (var i = 0; i < hist.Count; i += 2)
             {
                 var w = i; var b = i + 1;
@@ -118,36 +121,42 @@
             }
         </div>
         <div class="btn-row nav-row">
-            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(0)" disabled="@(_session.PlyCount == 0)" title="Đầu ván">⏮</button>
-            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(CurPly - 1)" disabled="@(CurPly <= 0)" title="Lùi">◀</button>
-            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(CurPly + 1)" disabled="@(CurPly >= _session.PlyCount)" title="Tới">▶</button>
-            <button class="btn btn-outline-secondary" @onclick="() => ViewPly(_session.PlyCount)" disabled="@(_viewPly < 0)" title="Mới nhất">⏭</button>
+            <button class="ibtn ibtn-sm" @onclick="() => ViewPly(0)" disabled="@(_session.PlyCount == 0)" title="Đầu ván">⏮</button>
+            <button class="ibtn ibtn-sm" @onclick="() => ViewPly(CurPly - 1)" disabled="@(CurPly <= 0)" title="Lùi">◀</button>
+            <button class="ibtn ibtn-sm" @onclick="() => ViewPly(CurPly + 1)" disabled="@(CurPly >= _session.PlyCount)" title="Tới">▶</button>
+            <button class="ibtn ibtn-sm" @onclick="() => ViewPly(_session.PlyCount)" disabled="@(_viewPly < 0)" title="Mới nhất">⏭</button>
             @if (_viewPly >= 0)
             {
                 <span class="hint">đang xem nước @_viewPly</span>
             }
         </div>
 
-        <label class="field">
-            Máy
-            <select @bind="_aiDepth" class="form-select">
-                <option value="1">Yếu (depth 1)</option>
-                <option value="2">Vừa (depth 2)</option>
-                <option value="3">Khá (depth 3)</option>
-            </select>
-        </label>
-        <label class="field">
-            Dàn thế cờ (FEN)
-            <input class="form-control form-control-sm" @bind="_fenInput" placeholder="để trống = bàn đầu" />
-        </label>
-        @if (!string.IsNullOrEmpty(_fenInput))
-        {
-            <button class="btn btn-outline-secondary" @onclick="SetupFen">Dàn cờ</button>
-        }
-        @if (_fenError)
-        {
-            <div class="hint">FEN không hợp lệ.</div>
-        }
+        <details class="cfg">
+            <summary>Tuỳ chỉnh</summary>
+            @if (_modePick.StartsWith("ai-"))
+            {
+                <label class="field">
+                    Độ khó của máy
+                    <select @bind="_aiDepth" class="form-select form-select-sm">
+                        <option value="1">Yếu (depth 1)</option>
+                        <option value="2">Vừa (depth 2)</option>
+                        <option value="3">Khá (depth 3)</option>
+                    </select>
+                </label>
+            }
+            <div class="field">
+                <span>Dàn thế cờ (FEN)</span>
+                <div class="fen-row">
+                    <input class="form-control form-control-sm" @bind="_fenInput" @bind:event="oninput"
+                           @onkeydown="FenKey" placeholder="để trống = bàn đầu" />
+                    <button class="ibtn ibtn-wide" @onclick="SetupFen">Dàn cờ</button>
+                </div>
+            </div>
+            @if (_fenError)
+            {
+                <div class="fen-err">FEN không hợp lệ.</div>
+            }
+        </details>
     </div>
 </div>
 
@@ -163,6 +172,7 @@
     private bool _flipped;
     private bool _confirmResign;
     private bool _confirmDraw;
+    private bool _confirmNew;
     private bool _drawDeclined;
     private int _aiDepth = 3;
     private int _viewPly = -1; // -1 = live board, >=0 = reviewing that ply
@@ -208,11 +218,18 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        try
+        for (var attempt = 0; attempt < 3 && _module is null; attempt++)
         {
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./js/chess3d.js?v={_scriptVer}");
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./js/chess3d.js?v={_scriptVer}");
+            }
+            catch (JSException)
+            {
+                if (attempt == 2) return;
+                await Task.Delay(400);
+            }
         }
-        catch (JSException) { return; }
         _dotNet = DotNetObjectReference.Create(this);
         await Js("initScene", _canvas, _dotNet);
         _ = RunClock();
@@ -262,7 +279,7 @@
     [JSInvokable]
     public async Task RightClicked()
     {
-        _confirmResign = _confirmDraw = false;
+        _confirmResign = _confirmDraw = _confirmNew = false;
         _session.ClearSelection();
         await PushHighlights();
     }
@@ -286,7 +303,7 @@
     {
         if (_viewPly >= 0) return; // board is read-only while reviewing
         var outcome = _session.Click(square);
-        _confirmResign = _confirmDraw = false;
+        _confirmResign = _confirmDraw = _confirmNew = false;
         switch (outcome.Result)
         {
             case ClickResult.Selected:
@@ -308,6 +325,12 @@
                 await AfterMove(outcome.Move!);
                 break;
         }
+    }
+
+    private async Task CancelPromo()
+    {
+        _session.CancelPromotion();
+        await PushHighlights();
     }
 
     private async Task PickPromo(string promo)
@@ -402,14 +425,22 @@
                 "ai-b" => (GameMode.VsAi, false),
                 _ => (GameMode.TwoPlayer, true),
             };
-            _session.NewGameFromFen(_fenInput.Trim(), mode, humanWhite);
+            var fen = _fenInput.Trim();
+            if (fen.Length == 0) _session.NewGame(mode, humanWhite);
+            else _session.NewGameFromFen(fen, mode, humanWhite);
         }
         catch (Exception) { _fenError = true; return; }
-        _confirmResign = _confirmDraw = _drawDeclined = false;
+        _confirmResign = _confirmDraw = _confirmNew = _drawDeclined = false;
         ResetClock();
         _flipped = _session.Mode == GameMode.VsAi && !_session.HumanIsWhite;
         await Js("setOrientation", !_flipped);
         await SyncBoard();
+    }
+
+    private async Task FenKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SetupFen();
     }
 
     [JSInvokable]
@@ -450,6 +481,36 @@
         catch (JSDisconnectedException) { }
     }
 
+    private CancellationTokenSource? _confirmCts;
+
+    /// Armed two-step confirms expire so a stale arm can't fire later.
+    private async void ArmExpire()
+    {
+        _confirmCts?.Cancel();
+        var cts = _confirmCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(4000, cts.Token);
+            _confirmResign = _confirmDraw = _confirmNew = false;
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private async Task NewGameClick()
+    {
+        // mid-game resets are destructive: same two-step affordance as resign/draw
+        var midGame = _session.PlyCount > 0 && !_session.IsGameOver;
+        if (midGame && !_confirmNew)
+        {
+            _confirmNew = true;
+            _confirmResign = _confirmDraw = false;
+            ArmExpire();
+            return;
+        }
+        await NewGame();
+    }
+
     private async Task NewGame()
     {
         var (mode, humanWhite) = _modePick switch
@@ -459,7 +520,7 @@
             _ => (GameMode.TwoPlayer, true),
         };
         _session.NewGame(mode, humanWhite);
-        _confirmResign = _confirmDraw = _drawDeclined = false;
+        _confirmResign = _confirmDraw = _confirmNew = _drawDeclined = false;
         _fenError = false;
         _fenInput = ""; // a new game leaves any stale FEN text incoherent with the board
         ResetClock();
@@ -486,7 +547,7 @@
 
     private async Task ResignClick()
     {
-        if (!_confirmResign) { _confirmResign = true; _confirmDraw = false; return; }
+        if (!_confirmResign) { _confirmResign = true; _confirmDraw = _confirmNew = false; ArmExpire(); return; }
         _confirmResign = false;
         _session.Resign();
         await Js("playSound", "end");
@@ -495,7 +556,7 @@
 
     private async Task DrawClick()
     {
-        if (!_confirmDraw) { _confirmDraw = true; _confirmResign = false; _drawDeclined = false; return; }
+        if (!_confirmDraw) { _confirmDraw = true; _confirmResign = _confirmNew = false; _drawDeclined = false; ArmExpire(); return; }
         _confirmDraw = false;
         if (_session.OfferDraw()) { await Js("playSound", "end"); }
         else _drawDeclined = true;
@@ -533,7 +594,6 @@
     {
         await Js("copyText", Pgn());
         _copied = true;
-        StateHasChanged();
         _ = Task.Delay(1500).ContinueWith(_ => { _copied = false; InvokeAsync(StateHasChanged); });
     }
 
@@ -543,6 +603,18 @@
         ['q'] = "♕", ['r'] = "♖", ['b'] = "♗", ['n'] = "♘", ['p'] = "♙",
     };
     private static string Sym(string t) => Glyphs.TryGetValue(t[0], out var g) ? g : t;
+
+    /// "♜ ♞ ♟×3 +2" — grouped glyphs with counts and the material lead.
+    private static string CapLine(List<string> pieces, int diff)
+    {
+        if (pieces.Count == 0 && diff == 0) return "—";
+        var order = new Dictionary<string, int> { ["q"] = 0, ["r"] = 1, ["b"] = 2, ["n"] = 3, ["p"] = 4 };
+        var s = string.Join(" ", pieces
+            .GroupBy(t => t)
+            .OrderBy(g => order.TryGetValue(g.Key.ToLowerInvariant(), out var o) ? o : 9)
+            .Select(g => Sym(g.Key) + (g.Count() > 1 ? $"×{g.Count()}" : "")));
+        return diff > 0 ? $"{s} +{diff}" : s;
+    }
 
     private static int PieceVal(string t) => char.ToUpperInvariant(t[0]) switch
     {

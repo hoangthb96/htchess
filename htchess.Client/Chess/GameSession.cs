@@ -12,7 +12,7 @@ namespace htchess.Client.Chess;
 public sealed class GameSession
 {
     private readonly IGame _game = GameFactory.Create();
-    private readonly List<(Move Move, State State, string San)> _history = new();
+    private readonly List<(Move Move, State State, string San, PieceDto? Victim)> _history = new();
     private readonly List<Move> _legal = new();
     // position-key -> occurrence count, for a true threefold check
     // (ChessLib's IsRepetition fires at 2-fold, a search heuristic; State.Key is
@@ -325,6 +325,13 @@ public sealed class GameSession
                     (DisplayTarget(m) == to || m.ToSquare().ToString() == to))
         .ToList();
 
+    /// Backdrop click on the promo picker: abort the pending promotion.
+    public void CancelPromotion()
+    {
+        _pendingPromoFrom = _pendingPromoTo = null;
+        ClearSelection();
+    }
+
     /// Right-click: drop selection and premove without making a move.
     public void ClearSelection()
     {
@@ -433,7 +440,17 @@ public sealed class GameSession
         // ChessLib emits "ep" + from-file + to ("eped6"); real SAN is "exd6"
         if (move.IsEnPassantMove() && san.Length > 3 && san.StartsWith("ep"))
             san = san[2] + "x" + san[3..];
+        // ChessLib's own +/# suffix is unreliable on sparse positions — strip it
+        // and re-derive from the post-move position below
+        san = san.TrimEnd('+', '#');
         var captured = CapturedSquareOf(move);
+        PieceDto? victim = null;
+        if (captured is not null)
+        {
+            Square vsq = captured;
+            var vp = Pos.GetPiece(vsq);
+            victim = new PieceDto(captured, TypeChar(vp.Type()), vp.ColorOf().IsWhite ? "w" : "b");
+        }
         string? rookFrom = null, rookTo = null;
         // ChessLib encodes castle as king->rook square; the king's real landing is g/c file
         var kingDest = CastleKingDest(move) ?? move.ToSquare().ToString();
@@ -451,10 +468,10 @@ public sealed class GameSession
         LastFrom = move.FromSquare().ToString();
         LastTo = kingDest;
         RefreshLegal();
-        // ChessLib omits the +/# suffixes; mate = opponent in check with no legal replies
-        if (Pos.InCheck && !san.EndsWith('+') && !san.EndsWith('#'))
+        // mate = opponent in check with no legal replies
+        if (Pos.InCheck)
             san += _legal.Count == 0 ? "#" : "+";
-        _history.Add((move, st, san));
+        _history.Add((move, st, san, victim));
 
         return new AppliedMove(
             LastFrom, kingDest,
@@ -482,7 +499,7 @@ public sealed class GameSession
         var removed = 0;
         for (var i = 0; i < plies && _history.Count > 0; i++)
         {
-            var (move, _, _) = _history[^1];
+            var (move, _, _, _) = _history[^1];
             _history.RemoveAt(_history.Count - 1);
             _fens.RemoveAt(_fens.Count - 1);
             removed++;
@@ -498,21 +515,13 @@ public sealed class GameSession
         RefreshLegal();
     }
 
-    /// Captured pieces, derived from piece counts. Returns e.g. ['q','p','p'] (black pieces white captured).
-    public List<string> CapturedByWhite() => Captured(wantWhite: false);
-    public List<string> CapturedByBlack() => Captured(wantWhite: true);
+    /// Captured pieces from the move history — exact for FEN setups, promotions and undo.
+    /// Uppercase chars = black victims (filled glyphs), lowercase = white victims.
+    public List<string> CapturedByWhite() => Captured(victimWhite: false);
+    public List<string> CapturedByBlack() => Captured(victimWhite: true);
 
-    private List<string> Captured(bool wantWhite)
-    {
-        var start = new Dictionary<char, int> { ['P'] = 8, ['N'] = 2, ['B'] = 2, ['R'] = 2, ['Q'] = 1 };
-        var cur = new Dictionary<char, int>(start) { };
-        foreach (var d in GetPosition())
-            if ((d.Color == "w") == wantWhite && d.Type != "K")
-                cur[d.Type[0]]--;
-        var lost = new List<string>();
-        foreach (var (t, n) in cur)
-            for (var i = 0; i < n; i++)
-                lost.Add(wantWhite ? char.ToLowerInvariant(t).ToString() : t.ToString());
-        return lost;
-    }
+    private List<string> Captured(bool victimWhite) => _history
+        .Where(h => h.Victim is not null && (h.Victim.Color == "w") == victimWhite)
+        .Select(h => victimWhite ? h.Victim!.Type.ToLowerInvariant() : h.Victim!.Type)
+        .ToList();
 }

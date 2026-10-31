@@ -120,7 +120,8 @@ function kingCrossV() { return new THREE.BoxGeometry(0.06, 0.22, 0.06); }
 function kingCrossH() { return new THREE.BoxGeometry(0.16, 0.06, 0.06); }
 
 const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf1e6cf, roughness: 0.55, metalness: 0.05 });
-const blackMat = new THREE.MeshStandardMaterial({ color: 0x36322e, roughness: 0.5, metalness: 0.15 });
+const blackMat = new THREE.MeshStandardMaterial({ color: 0x48413a, roughness: 0.45, metalness: 0.2 });
+const darkDetailMat = new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6 });
 
 function buildPiece(type, white) {
     const mat = white ? whiteMat : blackMat;
@@ -141,7 +142,20 @@ function buildPiece(type, white) {
             add(pawnGeo(), 0);
             add(pawnHead(), 0.62);
             break;
-        case 'R': add(rookGeo(), 0); break;
+        case 'R': {
+            add(rookGeo(), 0);
+            // merlons: four teeth around the rim so the rook reads as a castle tower
+            const tooth = new THREE.BoxGeometry(0.09, 0.1, 0.07);
+            for (let i = 0; i < 4; i++) {
+                const t = new THREE.Mesh(tooth, mat);
+                const a = i * Math.PI / 2;
+                t.position.set(Math.cos(a) * 0.215, 0.68, Math.sin(a) * 0.215);
+                t.rotation.y = -a;
+                t.castShadow = true;
+                g.add(t);
+            }
+            break;
+        }
         case 'N': {
             add(knightGeo(), 0);
             const head = add(knightHead(), 0.42);
@@ -151,6 +165,11 @@ function buildPiece(type, white) {
         case 'B': {
             add(bishopGeo(), 0);
             const top = add(bishopTop(), 0.72);
+            // mitre slit: thin dark groove across the head
+            const slit = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.13), darkDetailMat);
+            slit.position.set(0, 0.78, 0);
+            slit.rotation.z = 0.5;
+            g.add(slit);
             break;
         }
         case 'Q': {
@@ -169,6 +188,7 @@ function buildPiece(type, white) {
     g.scale.setScalar(0.85);
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
     g.userData.type = type;
+    g.userData.isWhite = white;
     return g;
 }
 
@@ -184,20 +204,21 @@ export function initScene(canvasEl, dotNetRef) {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1d24);
-    scene.fog = new THREE.Fog(0x1a1d24, 35, 70);
+    scene.background = new THREE.Color(0x14161b);
+    scene.fog = new THREE.Fog(0x14161b, 35, 70);
 
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, 12.2, 6.3);
+    camera.position.set(0, 9.7, 5.0);
 
     controls = new OrbitControls(camera, canvas);
     controls.enablePan = false;
+    controls.enableRotate = false; // board stays fixed and centred — zoom only
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 4;
     controls.maxDistance = 45;
     controls.maxPolarAngle = Math.PI / 2.1;
-    controls.target.set(0, 0, 0);
+    controls.target.set(0, -1.0, 0); // steeper look-down lifts the board toward vertical centre
 
     // lights
     scene.add(new THREE.HemisphereLight(0xd8e2ff, 0x40372c, 0.75));
@@ -416,7 +437,7 @@ export function setPieces(pieces) {
     // add / relocate
     for (const p of pieces) {
         const existing = pieceMeshes[p.square];
-        if (existing && existing.userData.type === p.type) continue;
+        if (existing && existing.userData.type === p.type && existing.userData.isWhite === (p.color === 'w')) continue;
         if (existing) { scene.remove(existing); delete pieceMeshes[p.square]; }
         const mesh = buildPiece(p.type, p.color === 'w');
         const v = sqToVec(p.square);
@@ -492,8 +513,8 @@ export function setHighlights(h) {
         m.position.set(v.x, 0.014, v.z);
         highlightGroup.add(m);
     };
-    if (h.lastMove) for (const s of h.lastMove) mk(s, 0x5b8bd6, 0.35);
-    if (h.selected) mk(h.selected, 0xf7d154, 0.5);
+    if (h.lastMove) for (const s of h.lastMove) mk(s, 0xd6c94e, 0.45);
+    if (h.selected) mk(h.selected, 0xffd83d, 0.62);
     for (const s of h.targets || []) dot(s);
     if (h.premove) for (const s of h.premove) mk(s, 0x9c4dc4, 0.4);
     if (h.check) mk(h.check, 0xd64545, 0.55, 0.96, 0.016);
@@ -502,6 +523,7 @@ export function setHighlights(h) {
 export function flipBoard() {
     flipped = !flipped;
     camera.position.z = -camera.position.z;
+    controls.target.z = -controls.target.z;
     rebuildCoords();
     controls.update();
 }
@@ -518,10 +540,13 @@ function labelMesh(text) {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const x = c.getContext('2d');
-    x.fillStyle = '#e6e0d0';
-    x.font = '600 40px "Segoe UI", system-ui, sans-serif';
+    x.font = '600 44px "Segoe UI", system-ui, sans-serif';
     x.textAlign = 'center';
     x.textBaseline = 'middle';
+    x.strokeStyle = 'rgba(0,0,0,0.55)';
+    x.lineWidth = 6;
+    x.strokeText(text, 32, 36);
+    x.fillStyle = '#f0e9da';
     x.fillText(text, 32, 36);
     const tex = new THREE.CanvasTexture(c);
     tex.anisotropy = 4;
@@ -594,23 +619,67 @@ function tick() {
 function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
 
 function fitDistance() {
-    const halfH = 4.9; // half board depth incl frame + headroom
-    const halfW = 4.6; // half board width incl frame
+    // projected board depth is foreshortened by the steep camera pitch (~27°
+    // off vertical); halfH below already includes that factor + frame margin
+    const halfH = 4.75; // incl front coordinate row (near edge projects largest)
+    // near edge (rank 1) is closer to the camera so it projects wider than
+    // the geometric half-width — pad so a/h corner squares never clip
+    const halfW = 5.0;
     const v = THREE.MathUtils.degToRad(camera.fov / 2);
-    return Math.max(halfH / Math.tan(v), halfW / (Math.tan(v) * camera.aspect)) * 1.06;
+    return Math.max(halfH / Math.tan(v), halfW / (Math.tan(v) * camera.aspect)) * 1.03;
 }
 
 function resize() {
-    const el = canvas.parentElement || canvas;
-    const w = el.clientWidth, h = Math.max(el.clientHeight, 200);
+    // measure the canvas itself: the parent's clientWidth includes padding
+    // (mobile right gutter for the eval pill), which would corrupt aspect
+    const w = canvas.clientWidth, h = Math.max(canvas.clientHeight, 200);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    // keep board fully visible: push camera out if too close for current aspect
-    const dir = camera.position.clone().sub(controls.target);
-    const dist = Math.max(dir.length(), fitDistance());
-    camera.position.copy(controls.target).add(dir.normalize().multiplyScalar(dist));
-    controls.minDistance = Math.min(4, fitDistance());
+    // keep board fully visible: push the camera out until every anchor —
+    // frame corners incl the coordinate-label strip plus the tallest piece
+    // tops — projects inside the viewport. Anchors beat a flat half-extent
+    // because the near edge foreshortens differently at narrow aspects.
+    const ANCHORS = [
+        [-4.95, 0, 4.95], [4.95, 0, 4.95], [-4.95, 0, -4.8], [4.95, 0, -4.8],
+        [0, 1.5, -3.7], [0, 1.4, 3.7],
+    ];
+    const dirN = camera.position.clone().sub(controls.target).normalize();
+    // a stale view offset from the previous resize() would poison the anchor
+    // probe below — clear it, then re-solve after the distance is final
+    camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+    let dist = Math.max(camera.position.distanceTo(controls.target), fitDistance());
+    const probe = new THREE.Vector3();
+    for (let i = 0; i < 20; i++) {
+        camera.position.copy(controls.target).addScaledVector(dirN, dist);
+        camera.updateMatrixWorld(); // refresh matrixWorldInverse for .project()
+        camera.updateProjectionMatrix();
+        if (ANCHORS.every(([x, y, z]) => {
+            probe.set(x, y, z).project(camera);
+            return Math.abs(probe.x) <= 0.96 && Math.abs(probe.y) <= 0.97;
+        })) break;
+        dist *= 1.04;
+    }
+    controls.minDistance = 5;
+    controls.maxDistance = dist * 1.15; // zoom allowed, never smaller than full view
+    // view offset lifts the projected board toward vertical centre — the fit
+    // leaves room for the top clock, so raw centering lands the board low.
+    // Probe the projected midpoint of the board's far/near edges (the near
+    // edge projects larger, so centre-of-origin is not the visual centre),
+    // then solve the exact offset (units vary with devicePixelRatio).
+    const EDGE = 3.5; // square-centre depth — the span the eye reads as centred
+    const projY = off => {
+        camera.setViewOffset(w, h, 0, off, w, h);
+        camera.updateProjectionMatrix();
+        const far = new THREE.Vector3(0, 0, -EDGE).project(camera).y;
+        const near = new THREE.Vector3(0, 0, EDGE).project(camera).y;
+        return (2 - far - near) / 4; // screen-space fraction of the span midpoint
+    };
+    const y0 = projY(0), y1 = projY(50);
+    const slope = (y1 - y0) / 50;
+    if (Math.abs(slope) > 1e-6)
+        camera.setViewOffset(w, h, 0, Math.round((0.5 - y0) / slope), w, h);
     controls.update();
 }
 
@@ -672,6 +741,8 @@ export function _debug() {
         aspect: +camera.aspect.toFixed(3),
         fit: +fitDistance().toFixed(2),
         pieces: Object.keys(pieceMeshes).length,
+        viewOffset: camera.view ? { x: camera.view.offsetX, y: camera.view.offsetY } : null,
+        target: controls ? { x: +controls.target.x.toFixed(2), y: +controls.target.y.toFixed(2), z: +controls.target.z.toFixed(2) } : null,
     } : 'no scene';
 }
 

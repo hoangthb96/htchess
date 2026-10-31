@@ -11,7 +11,7 @@ nav-menu {
     position: absolute;
     top: 0.5rem;
     right: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: none;
     background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.55%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") no-repeat center/1.75rem rgba(255, 255, 255, 0.1);
 }
 
@@ -21,7 +21,6 @@ nav-menu {
 
 .top-row {
     min-height: 3.5rem;
-    background-color: rgba(0,0,0,0.4);
 }
 
 .navbar-brand {
@@ -82,8 +81,8 @@ nav-menu {
 }
 
 .nav-item ::deep a.active {
-    background-color: rgba(255,255,255,0.37);
-    color: white;
+    background-color: var(--accent-soft, rgba(54,146,231,0.22));
+    color: var(--accent-strong, #5caaf0);
 }
 
 .nav-item ::deep .nav-link:hover {
@@ -92,7 +91,9 @@ nav-menu {
 }
 
 .nav-scrollable {
-    display: none;
+    /* drawer slide-in is governed by the sidebar transform (nav-cb), so the
+       items inside stay visible at every breakpoint */
+    display: block;
 }
 
 .navbar-toggler:checked ~ .nav-scrollable {
