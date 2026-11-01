@@ -1,0 +1,186 @@
+/* ---- htchess design tokens ---- */
+:root {
+    color-scheme: dark;
+    --bg-base: #14161b;
+    --bg-surface: #1e2128;
+    --bg-elevated: #262a33;
+    --bg-hover: #30353f;
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(255, 255, 255, 0.18);
+    --text-1: #e8e8e8;
+    --text-2: #a7adb8;
+    --text-3: #8b919c;
+    --accent: #3692e7;
+    --accent-strong: #5caaf0;
+    --accent-soft: rgba(54, 146, 231, 0.22);
+    --warn: #e0a43c;
+    --danger: #d64545;
+    --radius: 8px;
+    --radius-sm: 6px;
+}
+
+html, body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: var(--bg-base);
+    color: var(--text-1);
+}
+
+/* ---- thin, quiet scrollbars everywhere ---- */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+a, .btn-link {
+    color: var(--accent);
+}
+
+/* ---- buttons ---- */
+button:disabled, .btn:disabled { cursor: not-allowed; }
+.btn:disabled { opacity: 0.35; }
+
+.btn-primary {
+    color: #fff;
+    background-color: var(--accent);
+    border: none;
+}
+.btn-primary:hover:not(:disabled), .btn-primary:active {
+    background-color: var(--accent-strong);
+    color: #fff;
+}
+
+.btn-outline-secondary {
+    color: var(--text-2);
+    border-color: var(--line-strong);
+    background: transparent;
+}
+.btn-outline-secondary:hover:not(:disabled) {
+    color: var(--text-1);
+    background-color: var(--bg-hover);
+    border-color: var(--line-strong);
+}
+.btn-outline-secondary:disabled, .btn-outline-secondary.disabled {
+    color: var(--text-3);
+    border-color: var(--line);
+    background: transparent;
+}
+
+.btn-outline-danger {
+    color: #ef8a8a;
+    border-color: rgba(214, 69, 69, 0.5);
+}
+.btn-outline-danger:hover:not(:disabled) {
+    color: #fff;
+    background-color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-outline-warning {
+    color: var(--warn);
+    border-color: rgba(224, 164, 60, 0.5);
+}
+.btn-outline-warning:hover:not(:disabled) {
+    color: #14161b;
+    background-color: var(--warn);
+    border-color: var(--warn);
+}
+
+.btn-danger {
+    color: #fff;
+    background-color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-warning {
+    color: #14161b;
+    background-color: var(--warn);
+    border-color: var(--warn);
+}
+
+.btn-success {
+    color: #fff;
+    background-color: #26b050;
+    border-color: #26b050;
+}
+
+/* ---- form controls on dark ---- */
+.form-select, .form-control {
+    background-color: var(--bg-elevated);
+    border: none;
+    color: var(--text-1);
+}
+.form-select:focus, .form-control:focus {
+    background-color: var(--bg-elevated);
+    color: var(--text-1);
+    border: none;
+    box-shadow: 0 0 0 0.15rem var(--accent-soft);
+}
+.form-control::placeholder { color: var(--text-3); }
+.form-select option { background-color: var(--bg-elevated); color: var(--text-1); }
+.form-check-input {
+    background-color: var(--bg-elevated);
+    border-color: var(--line-strong);
+}
+.form-check-input:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+    box-shadow: 0 0 0 0.1rem var(--bg-base), 0 0 0 0.25rem var(--accent);
+}
+.form-select:focus { box-shadow: 0 0 0 0.15rem var(--accent-soft); }
+
+.content {
+    padding-top: 1.1rem;
+}
+
+h1:focus {
+    outline: none;
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid #26b050;
+}
+
+.invalid {
+    outline: 1px solid #e50000;
+}
+
+.validation-message {
+    color: #e50000;
+}
+
+.blazor-error-boundary {
+    background: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNDkiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIG92ZXJmbG93PSJoaWRkZW4iPjxkZWZzPjxjbGlwUGF0aCBpZD0iY2xpcDAiPjxyZWN0IHg9IjIzNSIgeT0iNTEiIHdpZHRoPSI1NiIgaGVpZ2h0PSI0OSIvPjwvY2xpcFBhdGg+PC9kZWZzPjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMCkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0yMzUgLTUxKSI+PHBhdGggZD0iTTI2My41MDYgNTFDMjY0LjcxNyA1MSAyNjUuODEzIDUxLjQ4MzcgMjY2LjYwNiA1Mi4yNjU4TDI2Ny4wNTIgNTIuNzk4NyAyNjcuNTM5IDUzLjYyODMgMjkwLjE4NSA5Mi4xODMxIDI5MC41NDUgOTIuNzk1IDI5MC42NTYgOTIuOTk2QzI5MC44NzcgOTMuNTEzIDI5MSA5NC4wODE1IDI5MSA5NC42NzgyIDI5MSA5Ny4wNjUxIDI4OS4wMzggOTkgMjg2LjYxNyA5OUwyNDAuMzgzIDk5QzIzNy45NjMgOTkgMjM2IDk3LjA2NTEgMjM2IDk0LjY3ODIgMjM2IDk0LjM3OTkgMjM2LjAzMSA5NC4wODg2IDIzNi4wODkgOTMuODA3MkwyMzYuMzM4IDkzLjAxNjIgMjM2Ljg1OCA5Mi4xMzE0IDI1OS40NzMgNTMuNjI5NCAyNTkuOTYxIDUyLjc5ODUgMjYwLjQwNyA1Mi4yNjU4QzI2MS4yIDUxLjQ4MzcgMjYyLjI5NiA1MSAyNjMuNTA2IDUxWk0yNjMuNTg2IDY2LjAxODNDMjYwLjczNyA2Ni4wMTgzIDI1OS4zMTMgNjcuMTI0NSAyNTkuMzEzIDY5LjMzNyAyNTkuMzEzIDY5LjYxMDIgMjU5LjMzMiA2OS44NjA4IDI1OS4zNzEgNzAuMDg4N0wyNjEuNzk1IDg0LjAxNjEgMjY1LjM4IDg0LjAxNjEgMjY3LjgyMSA2OS43NDc1QzI2Ny44NiA2OS43MzA5IDI2Ny44NzkgOTkuNTg3NyAyNjcuODc5IDY5LjMxNzkgMjY3Ljg3OSA2Ny4xMTgyIDI2Ni40NDggNjYuMDE4MyAyNjMuNTg2IDY2LjAxODNaTTI2My41NzYgODYuMDU0N0MyNjEuMDQ5IDg2LjA1NDcgMjU5Ljc4NiA4Ny4zMDA1IDI1OS43ODYgODkuNzkyMSAyNTkuNzg2IDkyLjI4MzcgMjYxLjA0OSA5My41Mjk1IDI2My41NzYgOTMuNTI5NSAyNjYuMTE2IDkzLjUyOTUgMjY3LjM4NyA5Mi4yODM3IDI2Ny4zODcgODkuNzkyMSAyNjcuMzg3IDg3LjMwMDUgMjY2LjExNiA4Ni4wNTQ3IDI2My41NzYgODYuMDU0N1oiIGZpbGw9IiNGRkU1MDAiIGZpbGwtcnVsZT0iZXZlbm9kZCI6ImZpbGwtcnVsZT0iZXZlbm9kZCI+PC9wYXRoPjwvZz48L3N2Zz4=) no-repeat 1rem/1.8rem, #b32121;
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: white;
+}
+
+    .blazor-error-boundary::after {
+        content: "An error has occurred."
+    }
+
+.darker-border-checkbox.form-check-input {
+    border-color: #929292;
+}
+
+.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
+    color: var(--bs-secondary-color);
+    text-align: end;
+}
+
+.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
+    text-align: start;
+}

@@ -1,0 +1,387 @@
+/* _content/htchess.Shared/Pages/Chess.razor.rz.scp.css */
+.chess-layout[b-1lpgemgoio] {
+    display: flex;
+    gap: 0.9rem;
+    height: 100vh;
+    min-height: 420px;
+    margin: -1.1rem -1.5rem 0;
+    padding: 0.9rem;
+    background: var(--bg-base);
+}
+
+.board-area[b-1lpgemgoio] {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-base);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.board-canvas[b-1lpgemgoio] {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+}
+
+/* the control panel is an overlay, not a layout column — the 3D board is the
+   display; controls live behind a status chip and slide in on hover or pin */
+.panel-wrap[b-1lpgemgoio] {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.7rem;
+    bottom: 0.6rem;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    width: 264px;
+    pointer-events: none; /* only the chip/card themselves are hit targets */
+}
+.panel-wrap > *[b-1lpgemgoio] { pointer-events: auto; }
+
+.panel-tab[b-1lpgemgoio] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    max-width: 100%;
+    padding: 0.35rem 0.7rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-1);
+    font-size: 0.82rem;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    cursor: pointer;
+}
+.panel-tab:hover[b-1lpgemgoio] { background: var(--bg-hover); }
+.tab-status[b-1lpgemgoio] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-chev[b-1lpgemgoio] { color: var(--text-3); transition: transform 0.18s ease; }
+.panel-wrap:hover .tab-chev[b-1lpgemgoio],
+.panel-wrap.pinned .tab-chev[b-1lpgemgoio] { transform: rotate(90deg); }
+
+.sheet-handle[b-1lpgemgoio] { display: none; }
+
+.side-panel[b-1lpgemgoio] {
+    align-self: stretch;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.7rem;
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    color: var(--text-1);
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    /* collapsed by default: the status chip alone represents the panel */
+    opacity: 0;
+    transform: translateY(-8px);
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+}
+.panel-wrap:hover .side-panel[b-1lpgemgoio],
+.panel-wrap.pinned .side-panel[b-1lpgemgoio] {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.panel-row[b-1lpgemgoio] { display: flex; gap: 0.5rem; }
+.panel-row .form-select[b-1lpgemgoio] { flex: 1; min-width: 0; padding-right: 1.6rem; }
+
+.field[b-1lpgemgoio] { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--text-2); }
+
+/* status reads as a headline, not an input */
+.status[b-1lpgemgoio] {
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+}
+
+/* ---- lichess-style icon button ---- */
+.ibtn[b-1lpgemgoio] {
+    width: 2.2rem;
+    height: 2.2rem;
+    display: inline-grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-2);
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+.ibtn:hover:not(:disabled)[b-1lpgemgoio] { background: var(--bg-hover); color: var(--text-1); }
+.ibtn:disabled[b-1lpgemgoio] { opacity: 0.35; cursor: not-allowed; }
+.ibtn-sm[b-1lpgemgoio] { width: 1.9rem; height: 1.9rem; font-size: 0.9rem; }
+.ibtn-primary[b-1lpgemgoio] { background: var(--accent); color: #fff; }
+.ibtn-primary:hover:not(:disabled)[b-1lpgemgoio] { background: var(--accent-strong); color: #fff; }
+.ibtn-danger[b-1lpgemgoio] { background: rgba(214, 69, 69, 0.28); color: #ff9d9d; }
+.ibtn.ibtn-danger:hover:not(:disabled)[b-1lpgemgoio] { background: rgba(214, 69, 69, 0.42); color: #ffb8b8; }
+.ibtn-warn[b-1lpgemgoio] { background: rgba(224, 164, 60, 0.24); color: var(--warn); }
+.ibtn.ibtn-warn:hover:not(:disabled)[b-1lpgemgoio] { background: rgba(224, 164, 60, 0.36); color: #ffce7a; }
+.ibtn-ok[b-1lpgemgoio] { background: rgba(38, 176, 80, 0.24); color: #7bd88f; }
+.ibtn.ibtn-ok:hover:not(:disabled)[b-1lpgemgoio] { background: rgba(38, 176, 80, 0.36); color: #a4e8b0; }
+.ibtn-wide[b-1lpgemgoio] { width: auto; height: 2rem; padding: 0 0.75rem; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+
+.icon-row[b-1lpgemgoio] { display: flex; gap: 0.4rem; }
+.btn-row[b-1lpgemgoio] { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.btn-row .btn:disabled[b-1lpgemgoio] { opacity: 0.35; }
+.nav-row[b-1lpgemgoio] { align-items: center; gap: 0.35rem; }
+
+/* captured pieces: quiet label + grouped glyphs */
+.captured[b-1lpgemgoio] { font-size: 1.05rem; line-height: 1.7; color: var(--text-1); }
+.cap-side[b-1lpgemgoio] {
+    display: inline-block;
+    min-width: 2.6rem;
+    color: var(--text-3);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.movelist[b-1lpgemgoio] {
+    flex: 1;
+    min-height: 9rem;
+    overflow-y: auto;
+    font-size: 0.9rem;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem;
+    display: flex;
+    flex-direction: column;
+}
+.move-empty[b-1lpgemgoio] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: var(--text-3);
+    font-size: 0.85rem;
+}
+
+.move-pair[b-1lpgemgoio] {
+    display: grid;
+    grid-template-columns: 2rem 1fr 1fr;
+    padding: 0.15rem 0.25rem;
+    border-radius: 4px;
+}
+.move-pair:nth-child(odd)[b-1lpgemgoio] { background: rgba(255,255,255,0.05); }
+.move-no[b-1lpgemgoio] { opacity: 0.6; }
+.move-san[b-1lpgemgoio] { cursor: pointer; border-radius: 3px; padding: 0 0.2rem; }
+.move-san:hover[b-1lpgemgoio] { background: rgba(255,255,255,0.12); }
+.move-san.cur[b-1lpgemgoio] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+
+/* collapsed "Tuỳ chỉnh" — advanced controls stay out of the way */
+.cfg[b-1lpgemgoio] { font-size: 0.9rem; }
+.cfg summary[b-1lpgemgoio] {
+    cursor: pointer;
+    color: var(--text-3);
+    font-size: 0.85rem;
+    user-select: none;
+    list-style-position: inside;
+}
+.cfg summary:hover[b-1lpgemgoio] { color: var(--text-2); }
+.cfg[open] summary[b-1lpgemgoio] { margin-bottom: 0.6rem; }
+.cfg[open][b-1lpgemgoio] { display: flex; flex-direction: column; gap: 0.6rem; }
+.cfg[open] > *:not(summary)[b-1lpgemgoio] { margin-left: 0; }
+.fen-row[b-1lpgemgoio] { display: flex; gap: 0.4rem; }
+.fen-row input[b-1lpgemgoio] { flex: 1; min-width: 0; }
+.fen-err[b-1lpgemgoio] { color: #ff9d9d; font-size: 0.85rem; font-weight: 600; }
+
+/* ---- floating elements over the board (shadow, not borders) ---- */
+.promo-overlay[b-1lpgemgoio] {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(2px);
+    z-index: 10;
+}
+
+.promo-box[b-1lpgemgoio] {
+    background: var(--bg-elevated);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    padding: 1.25rem 1.5rem;
+    border-radius: 10px;
+    text-align: center;
+    color: var(--text-1);
+}
+.promo-box p[b-1lpgemgoio] { margin: 0; color: var(--text-2); font-size: 0.9rem; }
+
+.promo-btns[b-1lpgemgoio] { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+.promo-btns button[b-1lpgemgoio] {
+    font-size: 1.1rem;
+    padding: 0.5rem 0.9rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: #fff;
+    cursor: pointer;
+}
+.promo-btns button:hover[b-1lpgemgoio] { background: #3a404c; }
+
+.ai-badge[b-1lpgemgoio] {
+    position: absolute;
+    top: 0.75rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.65);
+    color: #ffd966;
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    z-index: 5;
+}
+
+.clock[b-1lpgemgoio] {
+    position: absolute;
+    left: 0.6rem;
+    background: rgba(0,0,0,0.72);
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 0.3rem 0.7rem;
+    border-radius: var(--radius-sm);
+    z-index: 6;
+}
+/* both clocks share the same inset: symmetric corners, clear of the nav ☰
+   (top) and the "a" file label (bottom) */
+.clock-top[b-1lpgemgoio] { top: 0.6rem; left: 3.4rem; }
+.clock-bottom[b-1lpgemgoio] { bottom: 0.6rem; left: 3.4rem; }
+.clock.hot[b-1lpgemgoio] { background: var(--accent-soft); color: #fff; }
+
+.end-overlay[b-1lpgemgoio] {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(2px);
+    z-index: 9;
+}
+.end-box[b-1lpgemgoio] {
+    background: var(--bg-elevated);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    padding: 1.6rem 2.2rem;
+    border-radius: 12px;
+    text-align: center;
+    color: var(--text-1);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    align-items: center;
+}
+.end-result[b-1lpgemgoio] { font-size: 2rem; font-weight: 700; }
+.end-reason[b-1lpgemgoio] { color: var(--text-2); }
+
+.hint[b-1lpgemgoio] { font-size: 0.8rem; color: var(--text-3); }
+
+/* eval bar: slim rounded gauge hugging the board's left edge (lichess side),
+   number as a chip hanging off its bottom end (it is wider than the track) */
+.eval-bar[b-1lpgemgoio] {
+    position: absolute;
+    top: 0.9rem;
+    bottom: 1.6rem;
+    /* chess3d.js hands back the board's projected left edge each resize so the
+       gauge hugs the board instead of floating in empty table space */
+    left: var(--board-left, 0.7rem);
+    width: 0.85rem;
+    background: #0c0d11;
+    border-radius: 999px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 4px 14px rgba(0,0,0,0.35);
+    z-index: 4;
+}
+.eval-fill[b-1lpgemgoio] {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #e8e4da;
+    transition: height 0.35s ease;
+}
+.eval-num[b-1lpgemgoio] {
+    position: absolute;
+    left: max(0.1rem, calc(var(--board-left, 0.7rem) - 0.58rem));
+    bottom: 0.55rem;
+    min-width: 2rem;
+    text-align: center;
+    padding: 0.06rem 0.22rem;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(0,0,0,0.8);
+    border-radius: 4px;
+    z-index: 5;
+    pointer-events: none;
+}
+
+@media (max-width: 800px) {
+    /* small windows: the board owns the viewport, the panel collapses to a
+       bottom-sheet handle and only opens on tap */
+    .chess-layout[b-1lpgemgoio] { flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
+    .board-area[b-1lpgemgoio] {
+        aspect-ratio: auto;
+        padding-right: 2.3rem;   /* eval gutter */
+        padding-bottom: 2.6rem;  /* room for the collapsed sheet handle */
+    }
+    .panel-wrap[b-1lpgemgoio] {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 70%;
+        align-items: stretch;
+    }
+    .panel-tab[b-1lpgemgoio] { display: none; }
+    .sheet-handle[b-1lpgemgoio] {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        height: 2.3rem;
+        cursor: pointer;
+    }
+    .sheet-grip[b-1lpgemgoio] {
+        width: 2.6rem;
+        height: 0.28rem;
+        border-radius: 99px;
+        background: var(--text-3);
+    }
+    .side-panel[b-1lpgemgoio] {
+        height: 100%;
+        flex: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        /* collapsed: only the 2.3rem handle strip peeks from the bottom */
+        transform: translateY(calc(100% - 2.3rem));
+        border-radius: 14px 14px 0 0;
+        transition: transform 0.22s ease;
+    }
+    .panel-wrap:hover .side-panel[b-1lpgemgoio],
+    .panel-wrap.pinned .side-panel[b-1lpgemgoio] { transform: none; }
+    .clock[b-1lpgemgoio] { font-size: 0.85rem; padding: 0.2rem 0.55rem; }
+    .clock-top[b-1lpgemgoio] { top: 0.5rem; }
+    .clock-bottom[b-1lpgemgoio] { bottom: 2.8rem; left: 3.4rem; } /* above the sheet handle */
+    .eval-bar[b-1lpgemgoio] { left: auto; right: 0.7rem; bottom: 3rem; }
+    .eval-num[b-1lpgemgoio] { left: auto; right: 0.12rem; top: 0.55rem; bottom: auto; }
+}
