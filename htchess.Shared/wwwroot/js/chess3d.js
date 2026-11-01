@@ -45,98 +45,45 @@ function vecToSq(x, z) {
 
 // ---- procedural piece geometry ----
 
-function lathe(pts, segments = 24) {
+function lathe(pts, segments = 32) {
     const geo = new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), segments);
     geo.computeVertexNormals();
     return geo;
 }
 
-function pawnGeo() {
-    return lathe([
-        [0, 0], [0.30, 0], [0.30, 0.04], [0.26, 0.06], [0.18, 0.10],
-        [0.13, 0.16], [0.11, 0.30], [0.14, 0.34], [0.16, 0.36],
-        [0.155, 0.42], [0.12, 0.44], [0.13, 0.46],
-    ]).scale(1, 1, 1);
+function box(w, h, d) { return new THREE.BoxGeometry(w, h, d); }
+function ball(r, s = 16) { return new THREE.SphereGeometry(r, s, s); }
+function cyl(rt, rb, h, s = 24) { return new THREE.CylinderGeometry(rt, rb, h, s); }
+
+// horse-head side silhouette — extruded shape beats a tilted box every time
+function knightHeadGeo() {
+    const s = new THREE.Shape();
+    s.moveTo(-0.11, 0.00);
+    s.lineTo(0.10, 0.02);                                 // neck base front → jaw
+    s.quadraticCurveTo(0.17, 0.08, 0.15, 0.15);           // chin underside
+    s.quadraticCurveTo(0.24, 0.19, 0.27, 0.26);           // lower muzzle
+    s.quadraticCurveTo(0.305, 0.31, 0.285, 0.37);         // nostril → nose tip
+    s.quadraticCurveTo(0.24, 0.44, 0.155, 0.475);         // face → forehead
+    s.lineTo(0.115, 0.565);                               // ear front tip
+    s.lineTo(0.075, 0.51);                                // ear notch
+    s.lineTo(0.035, 0.575);                               // ear back tip
+    s.quadraticCurveTo(-0.02, 0.50, -0.05, 0.43);         // poll → crest
+    s.quadraticCurveTo(-0.12, 0.33, -0.13, 0.22);         // mane curve
+    s.quadraticCurveTo(-0.14, 0.10, -0.11, 0.00);         // neck back
+    const geo = new THREE.ExtrudeGeometry(s, {
+        depth: 0.12, bevelEnabled: true, bevelThickness: 0.022,
+        bevelSize: 0.02, bevelSegments: 2, curveSegments: 10,
+    });
+    geo.translate(0, 0, -0.082); // center on z including bevel
+    return geo;
 }
 
-function pawnHead() {
-    return new THREE.SphereGeometry(0.14, 16, 16);
-}
-
-function rookGeo() {
-    return lathe([
-        [0, 0], [0.32, 0], [0.32, 0.05], [0.28, 0.07], [0.22, 0.12],
-        [0.19, 0.20], [0.19, 0.48], [0.24, 0.52], [0.26, 0.55],
-        [0.26, 0.65], [0.20, 0.65], [0.20, 0.60], [0, 0.60],
-    ]);
-}
-
-function bishopGeo() {
-    return lathe([
-        [0, 0], [0.30, 0], [0.30, 0.05], [0.26, 0.08], [0.17, 0.14],
-        [0.12, 0.22], [0.10, 0.40], [0.15, 0.46], [0.18, 0.52],
-        [0.17, 0.58], [0.12, 0.62], [0.135, 0.65],
-    ]);
-}
-
-function bishopTop() {
-    const s = new THREE.SphereGeometry(0.11, 16, 16);
-    s.scale(1, 1.35, 1);
-    return s;
-}
-
-function knightGeo() {
-    return lathe([
-        [0, 0], [0.32, 0], [0.32, 0.05], [0.27, 0.08], [0.20, 0.13],
-        [0.16, 0.20], [0.15, 0.34], [0.20, 0.42], [0.17, 0.46],
-    ]);
-}
-
-function knightHead() {
-    // simple horse-head-ish: elongated box, tilted
-    const g = new THREE.BoxGeometry(0.16, 0.42, 0.34);
-    g.translate(0, 0.2, -0.03);
-    const m = new THREE.Matrix4().makeRotationX(-0.35);
-    g.applyMatrix4(m);
-    return g;
-}
-
-function queenGeo() {
-    return lathe([
-        [0, 0], [0.32, 0], [0.32, 0.05], [0.28, 0.08], [0.19, 0.15],
-        [0.13, 0.28], [0.11, 0.55], [0.15, 0.62], [0.19, 0.66],
-        [0.21, 0.74], [0.19, 0.80], [0.14, 0.82], [0.16, 0.85],
-    ]);
-}
-
-function queenTop() {
-    return new THREE.SphereGeometry(0.09, 12, 12);
-}
-
-function kingGeo() {
-    return lathe([
-        [0, 0], [0.32, 0], [0.32, 0.05], [0.28, 0.08], [0.19, 0.15],
-        [0.13, 0.28], [0.11, 0.58], [0.15, 0.64], [0.19, 0.68],
-        [0.20, 0.76], [0.18, 0.84], [0.13, 0.88],
-    ]);
-}
-
-function kingCrossV() { return new THREE.BoxGeometry(0.06, 0.22, 0.06); }
-function kingCrossH() { return new THREE.BoxGeometry(0.16, 0.06, 0.06); }
-
-const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf1e6cf, roughness: 0.55, metalness: 0.05 });
-const blackMat = new THREE.MeshStandardMaterial({ color: 0x48413a, roughness: 0.45, metalness: 0.2 });
-const darkDetailMat = new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6 });
-
-function buildPiece(type, white) {
-    const mat = white ? whiteMat : blackMat;
+// ---------- classic Staunton ----------
+function buildStaunton(type, mat, detail, white) {
     const g = new THREE.Group();
-    const h = PIECE_HEIGHT[type];
-
-    const add = (geo, y = 0, sy = 1) => {
-        const mesh = new THREE.Mesh(geo, mat);
+    const add = (geo, y = 0, m = mat) => {
+        const mesh = new THREE.Mesh(geo, m);
         mesh.position.y = y;
-        if (sy !== 1) mesh.scale.y = sy;
         mesh.castShadow = true;
         g.add(mesh);
         return mesh;
@@ -144,57 +91,237 @@ function buildPiece(type, white) {
 
     switch (type) {
         case 'P':
-            add(pawnGeo(), 0);
-            add(pawnHead(), 0.62);
+            add(lathe([
+                [0, 0], [0.30, 0], [0.30, 0.035], [0.265, 0.055], [0.22, 0.075],
+                [0.185, 0.10], [0.15, 0.14], [0.12, 0.21], [0.095, 0.31],
+                [0.09, 0.37], [0.10, 0.395], [0.14, 0.42], [0.15, 0.45],
+                [0.13, 0.475], [0.10, 0.49],
+            ]));
+            add(ball(0.14), 0.585);
             break;
         case 'R': {
-            add(rookGeo(), 0);
-            // merlons: four teeth around the rim so the rook reads as a castle tower
-            const tooth = new THREE.BoxGeometry(0.09, 0.1, 0.07);
-            for (let i = 0; i < 4; i++) {
+            add(lathe([
+                [0, 0], [0.325, 0], [0.325, 0.04], [0.295, 0.06], [0.255, 0.075],
+                [0.22, 0.095], [0.20, 0.13], [0.19, 0.36], [0.20, 0.42],
+                [0.23, 0.455], [0.26, 0.49], [0.27, 0.55], [0.275, 0.60],
+                [0.275, 0.63], [0.24, 0.63], [0.24, 0.59], [0, 0.59],
+            ]));
+            const tooth = box(0.10, 0.09, 0.05);
+            for (let i = 0; i < 6; i++) {
+                const a = i * Math.PI / 3;
                 const t = new THREE.Mesh(tooth, mat);
-                const a = i * Math.PI / 2;
-                t.position.set(Math.cos(a) * 0.215, 0.68, Math.sin(a) * 0.215);
-                t.rotation.y = -a;
+                t.position.set(Math.cos(a) * 0.252, 0.665, Math.sin(a) * 0.252);
+                t.rotation.y = -a - Math.PI / 2; // wide face tangential, thin side radial
                 t.castShadow = true;
                 g.add(t);
             }
             break;
         }
         case 'N': {
-            add(knightGeo(), 0);
-            const head = add(knightHead(), 0.42);
-            head.rotation.y = white ? -Math.PI / 2 : Math.PI / 2; // face opponent
+            add(lathe([
+                [0, 0], [0.315, 0], [0.315, 0.04], [0.285, 0.06], [0.24, 0.08],
+                [0.20, 0.105], [0.165, 0.145], [0.13, 0.21], [0.11, 0.30],
+                [0.105, 0.36], [0.125, 0.40], [0.15, 0.43], [0.135, 0.46],
+                [0.09, 0.465], [0, 0.465],
+            ]));
+            const head = add(knightHeadGeo(), 0.30);
+            head.scale.setScalar(0.78);
+            head.rotation.y = white ? Math.PI / 2 : -Math.PI / 2; // muzzle toward the opponent
+            const eye = ball(0.02, 8);
+            for (const zc of [-0.088, 0.088]) {
+                const e = new THREE.Mesh(eye, detail);
+                e.position.set(0.105, 0.40, zc / 0.78); // z applied pre-scale
+                head.add(e);
+            }
             break;
         }
         case 'B': {
-            add(bishopGeo(), 0);
-            const top = add(bishopTop(), 0.72);
-            // mitre slit: thin dark groove across the head
-            const slit = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.13), darkDetailMat);
-            slit.position.set(0, 0.78, 0);
-            slit.rotation.z = 0.5;
+            add(lathe([
+                [0, 0], [0.305, 0], [0.305, 0.04], [0.275, 0.06], [0.23, 0.08],
+                [0.19, 0.105], [0.155, 0.14], [0.125, 0.20], [0.10, 0.30],
+                [0.09, 0.40], [0.095, 0.46], [0.13, 0.49], [0.155, 0.51],
+                [0.15, 0.55], [0.115, 0.575], [0.09, 0.59],
+            ]));
+            const mitre = ball(0.10);
+            mitre.scale(1, 1.35, 1);
+            add(mitre, 0.66);
+            const slit = new THREE.Mesh(box(0.02, 0.15, 0.11), detail);
+            slit.position.set(0, 0.675, 0);
+            slit.rotation.z = 0.55;
             g.add(slit);
+            add(ball(0.038, 10), 0.785);
             break;
         }
         case 'Q': {
-            add(queenGeo(), 0);
-            add(queenTop(), 0.92);
+            add(lathe([
+                [0, 0], [0.335, 0], [0.335, 0.04], [0.30, 0.065], [0.25, 0.09],
+                [0.21, 0.12], [0.165, 0.17], [0.125, 0.25], [0.105, 0.38],
+                [0.095, 0.50], [0.10, 0.57], [0.135, 0.61], [0.175, 0.645],
+                [0.185, 0.68], [0.17, 0.715], [0.14, 0.735], [0.145, 0.765],
+                [0.125, 0.79],
+            ]));
+            // coronet: 8 prongs leaning out, each topped with a ball
+            const prong = new THREE.ConeGeometry(0.03, 0.11, 8);
+            const tip = ball(0.028, 8);
+            for (let i = 0; i < 8; i++) {
+                const a = i * Math.PI / 4;
+                const px = Math.cos(a) * 0.115, pz = Math.sin(a) * 0.115;
+                const c = new THREE.Mesh(prong, mat);
+                c.position.set(px, 0.835, pz);
+                c.rotation.set(Math.sin(a) * 0.22, 0, -Math.cos(a) * 0.22);
+                c.castShadow = true;
+                g.add(c);
+                const b = new THREE.Mesh(tip, mat);
+                b.position.set(px * 1.18, 0.885, pz * 1.18);
+                b.castShadow = true;
+                g.add(b);
+            }
+            add(ball(0.045, 12), 0.895);
             break;
         }
         case 'K': {
-            add(kingGeo(), 0);
-            const v = add(kingCrossV(), 0.98);
-            const hh = add(kingCrossH(), 0.98);
+            add(lathe([
+                [0, 0], [0.34, 0], [0.34, 0.04], [0.305, 0.065], [0.255, 0.09],
+                [0.215, 0.12], [0.17, 0.17], [0.13, 0.25], [0.11, 0.38],
+                [0.10, 0.52], [0.105, 0.60], [0.145, 0.645], [0.18, 0.68],
+                [0.19, 0.71], [0.175, 0.745], [0.15, 0.77], [0.155, 0.805],
+                [0.13, 0.825],
+            ]));
+            const dome = ball(0.13);
+            dome.scale(1, 0.75, 1);
+            add(dome, 0.845);
+            add(box(0.05, 0.18, 0.05), 0.955);
+            add(box(0.15, 0.05, 0.05), 0.965);
             break;
         }
     }
-    // normalize scale so all pieces share consistent board fit
+    return g;
+}
+
+// ---------- minimal geometric ----------
+function buildModern(type, mat, detail, white) {
+    const g = new THREE.Group();
+    const add = (geo, y = 0, m = mat) => {
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.position.y = y;
+        mesh.castShadow = true;
+        g.add(mesh);
+        return mesh;
+    };
+    const base = () => lathe([
+        [0, 0], [0.29, 0], [0.29, 0.05], [0.25, 0.05], [0.21, 0.10],
+        [0.17, 0.10], [0, 0.10],
+    ], 28);
+
+    add(base());
+    switch (type) {
+        case 'P':
+            add(cyl(0.065, 0.08, 0.32), 0.25);
+            add(ball(0.125), 0.50);
+            break;
+        case 'R': {
+            add(cyl(0.105, 0.12, 0.42), 0.30);
+            add(cyl(0.165, 0.165, 0.09), 0.55);
+            const tooth = box(0.075, 0.075, 0.05);
+            for (let i = 0; i < 4; i++) {
+                const a = i * Math.PI / 2 + Math.PI / 4;
+                const t = new THREE.Mesh(tooth, mat);
+                t.position.set(Math.cos(a) * 0.135, 0.635, Math.sin(a) * 0.135);
+                t.rotation.y = -a - Math.PI / 2;
+                t.castShadow = true;
+                g.add(t);
+            }
+            break;
+        }
+        case 'N': {
+            add(cyl(0.085, 0.10, 0.34), 0.26);
+            const head = add(new THREE.CapsuleGeometry(0.085, 0.22, 6, 12), 0.55);
+            head.rotation.z = -0.95;
+            head.position.x = 0.055;
+            head.rotation.y = white ? Math.PI / 2 : -Math.PI / 2;
+            break;
+        }
+        case 'B':
+            add(cyl(0.065, 0.08, 0.34), 0.26);
+            add(new THREE.ConeGeometry(0.095, 0.30, 20), 0.575);
+            add(ball(0.042, 10), 0.74);
+            break;
+        case 'Q':
+            add(cyl(0.075, 0.09, 0.42), 0.30);
+            add(new THREE.ConeGeometry(0.10, 0.32, 20), 0.615);
+            add(ball(0.055, 12), 0.805);
+            break;
+        case 'K':
+            add(cyl(0.08, 0.095, 0.46), 0.32);
+            add(new THREE.ConeGeometry(0.10, 0.34, 20), 0.655);
+            add(box(0.04, 0.13, 0.04), 0.855);
+            add(box(0.115, 0.04, 0.04), 0.865);
+            break;
+    }
+    return g;
+}
+
+// ---------- themes ----------
+const PIECE_THEMES = {
+    classic: {
+        build: buildStaunton,
+        mats: () => [
+            new THREE.MeshStandardMaterial({ color: 0xefe4c9, roughness: 0.48, metalness: 0.05, envMapIntensity: 0.35 }),
+            new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.42, metalness: 0.15, envMapIntensity: 0.4 }),
+            new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6, envMapIntensity: 0.3 }),
+        ],
+    },
+    modern: {
+        build: buildModern,
+        mats: () => [
+            new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.72, metalness: 0.0, envMapIntensity: 0.3 }),
+            new THREE.MeshStandardMaterial({ color: 0x1f1f24, roughness: 0.60, metalness: 0.1, envMapIntensity: 0.35 }),
+            new THREE.MeshStandardMaterial({ color: 0x0d0d0f, roughness: 0.55, envMapIntensity: 0.3 }),
+        ],
+    },
+    metal: {
+        build: buildStaunton,
+        mats: () => [
+            new THREE.MeshStandardMaterial({ color: 0xd4d7dd, roughness: 0.28, metalness: 0.9, envMapIntensity: 1.1 }),
+            new THREE.MeshStandardMaterial({ color: 0x3d4149, roughness: 0.35, metalness: 0.85, envMapIntensity: 1.0 }),
+            new THREE.MeshStandardMaterial({ color: 0x15161a, roughness: 0.4, metalness: 0.7, envMapIntensity: 0.8 }),
+        ],
+    },
+};
+
+const themeMats = {};
+let pieceTheme = 'classic';
+try {
+    const saved = localStorage.getItem('htchess.pieceTheme');
+    if (saved && PIECE_THEMES[saved]) pieceTheme = saved;
+} catch { }
+
+function matsFor(t) { return themeMats[t] ??= PIECE_THEMES[t].mats(); }
+
+function buildPiece(type, white) {
+    const [wm, bm, dm] = matsFor(pieceTheme);
+    const g = PIECE_THEMES[pieceTheme].build(type, white ? wm : bm, dm, white);
     g.scale.setScalar(0.85);
-    g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
     g.userData.type = type;
     g.userData.isWhite = white;
+    g.userData.theme = pieceTheme;
     return g;
+}
+
+function disposePiece(g) {
+    g.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+}
+
+let lastPieces = null;
+let lastCaptured = { w: [], b: [] };
+
+export function getPieceTheme() { return pieceTheme; }
+export function setPieceTheme(name) {
+    if (!PIECE_THEMES[name] || name === pieceTheme) return;
+    pieceTheme = name;
+    try { localStorage.setItem('htchess.pieceTheme', name); } catch { }
+    if (lastPieces) setPieces(lastPieces);   // theme mismatch rebuilds every mesh
+    setCaptured(lastCaptured.w, lastCaptured.b);
 }
 
 // ---- scene ----
@@ -228,6 +355,33 @@ function woodTexture() {
     return t;
 }
 
+// tiny procedural env map — warm gradient sky in an inverted sphere, PMREM'd.
+// Metal pieces go black without an environment to reflect.
+function makeEnvironment() {
+    const env = new THREE.Scene();
+    const cvs = document.createElement('canvas');
+    cvs.width = 4; cvs.height = 256;
+    const g = cvs.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#ffe9c4');   // warm overhead light
+    grad.addColorStop(0.4, '#8a6844'); // wood-toned mid band
+    grad.addColorStop(0.75, '#241a12');
+    grad.addColorStop(1, '#0c0a08');   // dark floor
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 4, 256);
+    const tex = new THREE.CanvasTexture(cvs);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(60, 24, 16),
+        new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
+    );
+    env.add(mesh);
+    const pm = new THREE.PMREMGenerator(renderer);
+    const rt = pm.fromScene(env, 0.05);
+    pm.dispose(); tex.dispose();
+    return rt.texture;
+}
+
 // soft warm disc — fakes a light pool so the board reads as lit, not floating
 function glowTexture() {
     const c = document.createElement('canvas');
@@ -256,6 +410,7 @@ export function initScene(canvasEl, dotNetRef) {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x14161b);
     scene.fog = new THREE.Fog(0x14161b, 35, 70);
+    scene.environment = makeEnvironment(); // subtle reflections — metals need this
 
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
     camera.position.set(0, 9.7, 5.0);
@@ -518,6 +673,7 @@ function onPointerUp(e) {
 
 export function setPieces(pieces) {
     // pieces: [{square:'e4', type:'P', color:'w'|'b'}, ...]
+    lastPieces = pieces;
     const want = {};
     for (const p of pieces) want[p.square] = p;
 
@@ -525,6 +681,7 @@ export function setPieces(pieces) {
     for (const sq of Object.keys(pieceMeshes)) {
         if (!want[sq]) {
             scene.remove(pieceMeshes[sq]);
+            disposePiece(pieceMeshes[sq]);
             delete pieceMeshes[sq];
         }
     }
@@ -532,8 +689,8 @@ export function setPieces(pieces) {
     let spawnIdx = 0;
     for (const p of pieces) {
         const existing = pieceMeshes[p.square];
-        if (existing && existing.userData.type === p.type && existing.userData.isWhite === (p.color === 'w')) continue;
-        if (existing) { scene.remove(existing); delete pieceMeshes[p.square]; }
+        if (existing && existing.userData.type === p.type && existing.userData.isWhite === (p.color === 'w') && existing.userData.theme === pieceTheme) continue;
+        if (existing) { scene.remove(existing); disposePiece(existing); delete pieceMeshes[p.square]; }
         const mesh = buildPiece(p.type, p.color === 'w');
         const v = sqToVec(p.square);
         mesh.position.set(v.x, PIECE_Y + 0.75, v.z);
@@ -572,6 +729,7 @@ function parkSlotPos(victimColor, idx) {
 let autoZoomed = false; // camera pushed itself out to reveal the parking rows
 
 export function setCaptured(whiteVictims, blackVictims) {
+    lastCaptured = { w: whiteVictims || [], b: blackVictims || [] };
     const had = parked.w.length + parked.b.length > 0;
     syncPark('w', whiteVictims || []);
     syncPark('b', blackVictims || []);
@@ -587,7 +745,7 @@ export function setCaptured(whiteVictims, blackVictims) {
 function syncPark(color, want) {
     const list = parked[color];
     // a mismatch anywhere in the visible order means rebuild from that slot
-    let cut = list.findIndex((m, i) => i >= want.length || m.userData.type !== want[i]);
+    let cut = list.findIndex((m, i) => i >= want.length || m.userData.type !== want[i] || m.userData.theme !== pieceTheme);
     if (cut === -1) cut = list.length;
     for (let j = list.length - 1; j >= cut; j--) {
         const m = list.pop();
@@ -776,6 +934,7 @@ function tick() {
                 const idx = pieceMeshes[a.sq];
                 if (idx === a.mesh) {
                     scene.remove(a.mesh);
+                    disposePiece(a.mesh);
                     const nm = buildPiece(a.promoteTo, a.white);
                     const v = sqToVec(a.sq);
                     nm.position.set(v.x, PIECE_Y, v.z);
@@ -1047,5 +1206,5 @@ export function copyText(text) {
 }
 
 // bridge for debugging & legacy callers (primary path is IJSObjectReference)
-globalThis.chess3d = { initScene, setPieces, setCaptured, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
+globalThis.chess3d = { initScene, setPieces, setCaptured, applyMove, setHighlights, flipBoard, setOrientation, setPieceTheme, getPieceTheme, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
     _setupFen: (fen) => dotNet?.invokeMethodAsync('DebugSetupFen', fen) };

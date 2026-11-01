@@ -147,6 +147,14 @@
                     </select>
                 </label>
             }
+            <label class="field">
+                Quân cờ
+                <select @bind="_pieceTheme" @bind:after="ApplyPieceTheme" class="form-select form-select-sm">
+                    <option value="classic">Cổ điển</option>
+                    <option value="modern">Hiện đại</option>
+                    <option value="metal">Kim loại</option>
+                </select>
+            </label>
             <div class="field">
                 <span>Dàn thế cờ (FEN)</span>
                 <div class="fen-row">
@@ -173,6 +181,7 @@
     private readonly SimpleAi _ai = new();
     private string _modePick = "2p";
     private string _tcPick = "none";
+    private string _pieceTheme = "classic";
     private bool _aiThinking;
     private bool _flipped;
     private bool _confirmResign;
@@ -240,6 +249,16 @@
         }
         _dotNet = DotNetObjectReference.Create(this);
         await Js("initScene", _canvas, _dotNet);
+        try
+        {
+            var t = await _module!.InvokeAsync<string>("getPieceTheme");
+            if (!string.IsNullOrEmpty(t) && t != _pieceTheme)
+            {
+                _pieceTheme = t;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (JSException) { }
         _ = RunClock();
     }
 
@@ -447,6 +466,8 @@
         await Js("setOrientation", !_flipped);
         await SyncBoard();
     }
+
+    private async Task ApplyPieceTheme() => await Js("setPieceTheme", _pieceTheme);
 
     private async Task FenKey(KeyboardEventArgs e)
     {
