@@ -9,4 +9,5 @@ if not exist "publish\htchess.exe" (
     echo First run: publishing release build...
     "%DOTNET_ROOT%\dotnet.exe" publish htchess\htchess.csproj -c Release -o publish || exit /b 1
 )
-"publish\htchess.exe"
+cd /d "%~dp0publish"
+"htchess.exe"
