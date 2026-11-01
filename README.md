@@ -45,8 +45,14 @@ dotnet publish htchess.GhPages -c Release -o gh-out
 
 ## Deploy
 
-`.github/workflows/pages.yml` tự publish `htchess.GhPages` và deploy lên
-GitHub Pages mỗi lần push `main`.
+Site static phục vụ từ branch `gh-pages` (source: root `/`). Cập nhật:
+
+```powershell
+dotnet publish htchess.GhPages -c Release -o gh-out
+git worktree add ../htchess-ghp gh-pages
+robocopy gh-out\wwwroot ..\htchess-ghp /MIR
+cd ..\htchess-ghp && git add -A && git commit -m "Deploy" && git push origin gh-pages
+```
 
 ## Stack
 
