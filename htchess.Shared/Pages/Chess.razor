@@ -3,7 +3,7 @@
 @rendermode InteractiveWebAssembly
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-@using htchess.Client.Chess
+@using htchess.Shared.Chess
 
 <PageTitle>htchess — cờ vua 3D</PageTitle>
 
@@ -50,9 +50,12 @@
                 </div>
             </div>
         }
-    </div>
-
-    <div class="side-panel">
+        <div class="panel-wrap @(_panelPinned ? "pinned" : "")">
+            <button class="panel-tab" @onclick="TogglePanel" title="Bảng điều khiển">
+                <span class="tab-status">@StatusText()</span><span class="tab-chev">‹</span>
+            </button>
+            <div class="side-panel">
+                <div class="sheet-handle" @onclick="TogglePanel"><span class="sheet-grip"></span></div>
         <div class="panel-row">
             <select @bind="_modePick" class="form-select form-select-sm" title="Chế độ">
                 <option value="2p">2 người</option>
@@ -157,6 +160,8 @@
                 <div class="fen-err">FEN không hợp lệ.</div>
             }
         </details>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -173,6 +178,9 @@
     private bool _confirmResign;
     private bool _confirmDraw;
     private bool _confirmNew;
+    private bool _panelPinned;
+
+    private void TogglePanel() => _panelPinned = !_panelPinned;
     private bool _drawDeclined;
     private int _aiDepth = 3;
     private int _viewPly = -1; // -1 = live board, >=0 = reviewing that ply
@@ -222,7 +230,7 @@
         {
             try
             {
-                _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./js/chess3d.js?v={_scriptVer}");
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", $"./_content/htchess.Shared/js/chess3d.js?v={_scriptVer}");
             }
             catch (JSException)
             {
@@ -348,6 +356,7 @@
         if (ClockOn) { if (_session.WhiteToMove) _blackMs += _incMs; else _whiteMs += _incMs; }
         await Js("applyMove", m.From, m.To,
             new { capturedSquare = m.CapturedSquare, rookFrom = m.RookFrom, rookTo = m.RookTo, promoteTo = m.PromoteTo });
+        await Js("setCaptured", _session.CapturedByBlack(), _session.CapturedByWhite());
         await PlayMoveSound(m);
         await PushHighlights();
         await MaybeAiMove();
@@ -399,6 +408,7 @@
     {
         var pieces = _session.GetPosition().Select(p => new { square = p.Square, type = p.Type, color = p.Color });
         await Js("setPieces", pieces);
+        await Js("setCaptured", _session.CapturedByBlack(), _session.CapturedByWhite());
     }
 
     /// Show the board as of ply `ply` (-1/PlyCount = live). Read-only while viewing.
@@ -409,6 +419,7 @@
         {
             var pieces = _session.PiecesAt(_viewPly).Select(p => new { square = p.Square, type = p.Type, color = p.Color });
             await Js("setPieces", pieces);
+            await Js("setCaptured", _session.CapturedByBlack(_viewPly), _session.CapturedByWhite(_viewPly));
         }
         else await SyncPieces();
         await PushHighlights();

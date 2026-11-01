@@ -1,4 +1,4 @@
-using htchess.Client.Pages;
+using htchess.Shared.Pages;
 using htchess.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +22,6 @@ app.UseHttpsRedirection();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
-    .AddAdditionalAssemblies(typeof(htchess.Client._Imports).Assembly);
+    .AddAdditionalAssemblies(typeof(htchess.Shared._Imports).Assembly);
 
 app.Run();

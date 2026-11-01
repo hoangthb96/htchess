@@ -27,18 +27,71 @@
     touch-action: none;
 }
 
+/* the control panel is an overlay, not a layout column — the 3D board is the
+   display; controls live behind a status chip and slide in on hover or pin */
+.panel-wrap {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.7rem;
+    bottom: 0.6rem;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    width: 264px;
+    pointer-events: none; /* only the chip/card themselves are hit targets */
+}
+.panel-wrap > * { pointer-events: auto; }
+
+.panel-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    max-width: 100%;
+    padding: 0.35rem 0.7rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-1);
+    font-size: 0.82rem;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    cursor: pointer;
+}
+.panel-tab:hover { background: var(--bg-hover); }
+.tab-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-chev { color: var(--text-3); transition: transform 0.18s ease; }
+.panel-wrap:hover .tab-chev,
+.panel-wrap.pinned .tab-chev { transform: rotate(90deg); }
+
+.sheet-handle { display: none; }
+
 .side-panel {
-    width: 296px;
-    flex-shrink: 0;
+    align-self: stretch;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    padding: 0.8rem;
+    padding: 0.7rem;
     background: var(--bg-surface);
     border-radius: var(--radius);
     color: var(--text-1);
     overflow-y: auto;
-    min-height: 0;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    /* collapsed by default: the status chip alone represents the panel */
+    opacity: 0;
+    transform: translateY(-8px);
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+}
+.panel-wrap:hover .side-panel,
+.panel-wrap.pinned .side-panel {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
 }
 
 .panel-row { display: flex; gap: 0.5rem; }
@@ -239,13 +292,15 @@
 
 .hint { font-size: 0.8rem; color: var(--text-3); }
 
-/* eval bar: slim rounded gauge on the board area's right edge, number as a
-   chip hanging off its bottom end (it is wider than the track) */
+/* eval bar: slim rounded gauge hugging the board's left edge (lichess side),
+   number as a chip hanging off its bottom end (it is wider than the track) */
 .eval-bar {
     position: absolute;
     top: 0.9rem;
     bottom: 1.6rem;
-    right: 0.7rem;
+    /* chess3d.js hands back the board's projected left edge each resize so the
+       gauge hugs the board instead of floating in empty table space */
+    left: var(--board-left, 0.7rem);
     width: 0.85rem;
     background: #0c0d11;
     border-radius: 999px;
@@ -263,7 +318,7 @@
 }
 .eval-num {
     position: absolute;
-    right: 0.12rem;
+    left: max(0.1rem, calc(var(--board-left, 0.7rem) - 0.58rem));
     bottom: 0.55rem;
     min-width: 2rem;
     text-align: center;
@@ -278,13 +333,54 @@
 }
 
 @media (max-width: 800px) {
-    .chess-layout { flex-direction: column; height: auto; }
-    /* aspect slack keeps clocks off the board; right padding opens a gutter
-       for the eval pill so it never covers the board or the "h" label */
-    .board-area { aspect-ratio: 1 / 1.12; padding-right: 2.3rem; }
-    .side-panel { width: 100%; }
+    /* small windows: the board owns the viewport, the panel collapses to a
+       bottom-sheet handle and only opens on tap */
+    .chess-layout { flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
+    .board-area {
+        aspect-ratio: auto;
+        padding-right: 2.3rem;   /* eval gutter */
+        padding-bottom: 2.6rem;  /* room for the collapsed sheet handle */
+    }
+    .panel-wrap {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 70%;
+        align-items: stretch;
+    }
+    .panel-tab { display: none; }
+    .sheet-handle {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        height: 2.3rem;
+        cursor: pointer;
+    }
+    .sheet-grip {
+        width: 2.6rem;
+        height: 0.28rem;
+        border-radius: 99px;
+        background: var(--text-3);
+    }
+    .side-panel {
+        height: 100%;
+        flex: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        /* collapsed: only the 2.3rem handle strip peeks from the bottom */
+        transform: translateY(calc(100% - 2.3rem));
+        border-radius: 14px 14px 0 0;
+        transition: transform 0.22s ease;
+    }
+    .panel-wrap:hover .side-panel,
+    .panel-wrap.pinned .side-panel { transform: none; }
     .clock { font-size: 0.85rem; padding: 0.2rem 0.55rem; }
     .clock-top { top: 0.5rem; }
-    .clock-bottom { bottom: 0.15rem; left: 3.4rem; } /* right of the "a" file label */
-    .eval-num { top: 0.55rem; bottom: auto; } /* cap the pill's top, clear of the "h" label */
+    .clock-bottom { bottom: 2.8rem; left: 3.4rem; } /* above the sheet handle */
+    .eval-bar { left: auto; right: 0.7rem; bottom: 3rem; }
+    .eval-num { left: auto; right: 0.12rem; top: 0.55rem; bottom: auto; }
 }

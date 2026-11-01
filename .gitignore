@@ -486,3 +486,7 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 nul
+
+# Local publish/test output
+gh-out/
+gh-serve/

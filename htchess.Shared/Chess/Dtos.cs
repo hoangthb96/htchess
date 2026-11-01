@@ -1,4 +1,4 @@
-namespace htchess.Client.Chess;
+namespace htchess.Shared.Chess;
 
 public enum GameMode { TwoPlayer, VsAi }
 

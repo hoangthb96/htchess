@@ -23,6 +23,11 @@ let lastSelected = null;
 let drag = null;           // {mesh, from, started, origin:Vector3}
 let hoverSq = null;        // square under cursor while dragging
 let hoverHl = null;        // hover highlight mesh
+let dust = null;           // ambient particle field
+let elapsed = 0;           // accumulated seconds for ambient motion
+const parallax = { x: 0, y: 0 }; // pointer-driven camera drift, -1..1
+let hoveredMesh = null;    // piece lifting under the cursor
+let parked = { w: [], b: [] };   // captured meshes resting on the table
 
 const PIECE_HEIGHT = { P: 0.55, N: 0.7, B: 0.75, R: 0.65, Q: 0.9, K: 1.0 };
 
@@ -194,6 +199,51 @@ function buildPiece(type, white) {
 
 // ---- scene ----
 
+// procedural walnut grain — dark base, faint streaks and a few soft knots
+function woodTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = '#251a11';
+    g.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 110; i++) {
+        const y = Math.random() * 512, h = 1 + Math.random() * 2.5;
+        g.fillStyle = Math.random() < 0.55 ? 'rgba(0,0,0,0.10)' : 'rgba(122,84,50,0.07)';
+        g.fillRect(0, y, 512, h);
+    }
+    for (let i = 0; i < 9; i++) {
+        const x = Math.random() * 512, y = Math.random() * 512, r = 9 + Math.random() * 22;
+        const rad = g.createRadialGradient(x, y, 1, x, y, r);
+        rad.addColorStop(0, 'rgba(58,38,20,0.4)');
+        rad.addColorStop(1, 'rgba(58,38,20,0)');
+        g.fillStyle = rad;
+        g.beginPath();
+        g.ellipse(x, y, r * 1.7, r * 0.8, Math.random() * 3, 0, 7);
+        g.fill();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(2.6, 2.6);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+}
+
+// soft warm disc — fakes a light pool so the board reads as lit, not floating
+function glowTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d');
+    const rad = g.createRadialGradient(128, 128, 8, 128, 128, 128);
+    rad.addColorStop(0, 'rgba(255,205,140,0.34)');
+    rad.addColorStop(0.55, 'rgba(255,190,120,0.10)');
+    rad.addColorStop(1, 'rgba(255,190,120,0)');
+    g.fillStyle = rad;
+    g.fillRect(0, 0, 256, 256);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+}
+
 export function initScene(canvasEl, dotNetRef) {
     canvas = canvasEl;
     dotNet = dotNetRef;
@@ -239,15 +289,44 @@ export function initScene(canvasEl, dotNetRef) {
     frame.receiveShadow = true;
     scene.add(frame);
 
-    // ground
-    const ground = new THREE.Mesh(
-        new THREE.CircleGeometry(16, 48),
-        new THREE.MeshStandardMaterial({ color: 0x232830, roughness: 1 })
+    // walnut table with a warm pool of light under the board
+    const table = new THREE.Mesh(
+        new THREE.CircleGeometry(30, 64),
+        new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.85 })
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.32;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    table.rotation.x = -Math.PI / 2;
+    table.position.y = -0.32;
+    table.receiveShadow = true;
+    scene.add(table);
+
+    const pool = new THREE.Mesh(
+        new THREE.PlaneGeometry(24, 24),
+        new THREE.MeshBasicMaterial({
+            map: glowTexture(), transparent: true, opacity: 0.5,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        })
+    );
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = -0.30;
+    scene.add(pool);
+
+    // dust motes drifting in the light
+    {
+        const n = 110, pos = new Float32Array(n * 3), seed = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            pos[i * 3] = (Math.random() - 0.5) * 20;
+            pos[i * 3 + 1] = 0.2 + Math.random() * 4.5;
+            pos[i * 3 + 2] = (Math.random() - 0.5) * 20;
+            seed[i] = Math.random() * 6.28;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        dust = new THREE.Points(geo, new THREE.PointsMaterial({
+            color: 0xc9a86a, size: 0.05, transparent: true, opacity: 0.45, depthWrite: false,
+        }));
+        dust.userData.seed = seed;
+        scene.add(dust);
+    }
 
     // 64 squares
     const sqGeo = new THREE.PlaneGeometry(SQ * 0.98, SQ * 0.98);
@@ -280,6 +359,7 @@ export function initScene(canvasEl, dotNetRef) {
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerleave', () => { parallax.x = 0; parallax.y = 0; clearHover(); });
     canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('keydown', onKeyNav);
@@ -359,14 +439,27 @@ function onPointerDown(e) {
 
 const DRAG_Y = 0.42;
 
+function clearHover() {
+    if (hoveredMesh) { hoveredMesh.userData.lift = false; hoveredMesh = null; }
+}
+
 function onPointerMove(e) {
     if (!dotNet || !scene) return;
     if (!drag) {
-        // cheap hover cursor over pieces
         const r = canvas.getBoundingClientRect();
         if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+            // camera drift: the table lives in 3D, so the view leans a touch
+            // with the pointer instead of staying glued down
+            const n = ndcFromEvent(e);
+            parallax.x = n.x; parallax.y = n.y;
             const hit = pickAt(e);
             canvas.style.cursor = hit.kind === 'piece' ? 'grab' : '';
+            const m = hit.kind === 'piece' ? pieceMeshes[hit.sq] : null;
+            if (m !== hoveredMesh) {
+                clearHover();
+                hoveredMesh = m;
+                if (hoveredMesh) hoveredMesh.userData.lift = true;
+            }
         }
         return;
     }
@@ -406,6 +499,7 @@ function onPointerUp(e) {
     const d = drag; drag = null;
     controls.enabled = true;
     canvas.style.cursor = '';
+    clearHover(); // hover re-picks on the next move; the dragged mesh keeps no lift
     if (hoverHl) { highlightGroup.remove(hoverHl); hoverHl.geometry.dispose(); hoverHl = null; }
     hoverSq = null;
     if (!d.started) return; // it was a plain click — pointerdown already handled
@@ -434,31 +528,102 @@ export function setPieces(pieces) {
             delete pieceMeshes[sq];
         }
     }
-    // add / relocate
+    // add / relocate — new meshes drop in from above, staggered
+    let spawnIdx = 0;
     for (const p of pieces) {
         const existing = pieceMeshes[p.square];
         if (existing && existing.userData.type === p.type && existing.userData.isWhite === (p.color === 'w')) continue;
         if (existing) { scene.remove(existing); delete pieceMeshes[p.square]; }
         const mesh = buildPiece(p.type, p.color === 'w');
         const v = sqToVec(p.square);
-        mesh.position.set(v.x, PIECE_Y, v.z);
+        mesh.position.set(v.x, PIECE_Y + 0.75, v.z);
         mesh.userData.square = p.square;
         pieceMeshes[p.square] = mesh;
         scene.add(mesh);
+        animations.push({ mesh, kind: 'drop', t: -spawnIdx++ * 0.07, from: mesh.position.clone(), to: new THREE.Vector3(v.x, PIECE_Y, v.z) });
     }
-    animations = [];
+    // settle any in-flight tweens instantly before dropping the queue —
+    // fades finish by removal or the half-shrunk ghost would linger in scene
+    for (const a of animations) {
+        if (a.kind === 'fade') scene.remove(a.mesh);
+        else if (a.to && a.kind !== 'drop') {
+            a.mesh.position.copy(a.to);
+            if (a.toRot !== undefined) a.mesh.rotation.z = a.toRot;
+        }
+    }
+    animations = animations.filter(a => a.kind === 'drop');
+}
+
+// captured pieces rest on the table in a loose row off the capturer's edge:
+// black victims (taken by White) line up near rank 1, white victims off rank 8.
+// They lie knocked over, like scooped-up pieces on a real table.
+const PARK_X0 = -3.85, PARK_DX = 1.1;
+const PARK_Y = -0.02; // table top (−0.32) + a lying piece's base radius
+function parkSlotPos(victimColor, idx) {
+    const sign = (victimColor === 'b' ? 1 : -1) * (flipped ? -1 : 1);
+    return {
+        x: PARK_X0 + (idx % 8) * PARK_DX,
+        z: sign * (5.35 + Math.floor(idx / 8) * 0.62),
+    };
+}
+
+// reconcile parked meshes with the session's captured lists (move, undo,
+// review ply, FEN) — extras fade out, missing ones drop onto the table
+let autoZoomed = false; // camera pushed itself out to reveal the parking rows
+
+export function setCaptured(whiteVictims, blackVictims) {
+    const had = parked.w.length + parked.b.length > 0;
+    syncPark('w', whiteVictims || []);
+    syncPark('b', blackVictims || []);
+    // last parked piece gone (undo/new game/FEN): breathe the camera back in
+    if (had && parked.w.length + parked.b.length === 0 && autoZoomed) {
+        autoZoomed = false;
+        resize();
+        const dirN = camera.position.clone().sub(controls.target).normalize();
+        camera.position.copy(controls.target).addScaledVector(dirN, anchorDist(BASE_ANCHORS, fitDistance()));
+    }
+}
+
+function syncPark(color, want) {
+    const list = parked[color];
+    // a mismatch anywhere in the visible order means rebuild from that slot
+    let cut = list.findIndex((m, i) => i >= want.length || m.userData.type !== want[i]);
+    if (cut === -1) cut = list.length;
+    for (let j = list.length - 1; j >= cut; j--) {
+        const m = list.pop();
+        animations.push({ mesh: m, kind: 'fade', t: 0 });
+    }
+    let spawned = 0;
+    for (let i = list.length; i < want.length; i++) {
+        const m = buildPiece(want[i], color === 'w');
+        const s = parkSlotPos(color, i);
+        m.position.set(s.x, PARK_Y + 0.8, s.z);
+        m.rotation.y = (Math.random() - 0.5) * 0.5;
+        const tip = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2 + (Math.random() - 0.5) * 0.3);
+        m.userData.isWhite = color === 'w';
+        list.push(m);
+        scene.add(m);
+        animations.push({ mesh: m, kind: 'drop', t: -spawned++ * 0.06 - 0.05, from: m.position.clone(), to: new THREE.Vector3(s.x, PARK_Y, s.z), toRot: tip });
+    }
 }
 
 export function applyMove(from, to, opts = {}) {
     const mover = pieceMeshes[from];
     if (!mover) return;
 
-    // capture (normal or en passant via opts.capturedSquare)
+    // capture (normal or en passant via opts.capturedSquare): the victim hops
+    // off the board and comes to rest on the table beside its capturer's edge
     const capSq = opts.capturedSquare || (pieceMeshes[to] ? to : null);
     if (capSq && pieceMeshes[capSq]) {
         const victim = pieceMeshes[capSq];
         delete pieceMeshes[capSq];
-        animations.push({ mesh: victim, kind: 'fade', t: 0 });
+        const color = victim.userData.isWhite ? 'w' : 'b';
+        const idx = parked[color].length;
+        parked[color].push(victim);
+        const s = parkSlotPos(color, idx);
+        const tip = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2 + (Math.random() - 0.5) * 0.3);
+        animations.push({ mesh: victim, kind: 'park', t: 0, from: victim.position.clone(), to: new THREE.Vector3(s.x, PARK_Y, s.z), toRot: tip });
+        victim.rotation.y = (Math.random() - 0.5) * 0.6;
     }
 
     // move
@@ -479,11 +644,8 @@ export function applyMove(from, to, opts = {}) {
 
     // promotion: swap model after landing
     if (opts.promoteTo) {
-        const color = 'w'; // placeholder replaced below
-        const isWhite = mover.children[0]?.material === whiteMat;
-        const sq = to;
         animations.push({
-            kind: 'promote', t: 0, sq, promoteTo: opts.promoteTo, white: isWhite, mesh: mover,
+            kind: 'promote', t: 0, sq: to, promoteTo: opts.promoteTo, white: mover.userData.isWhite, mesh: mover,
         });
     }
 }
@@ -525,6 +687,12 @@ export function flipBoard() {
     camera.position.z = -camera.position.z;
     controls.target.z = -controls.target.z;
     rebuildCoords();
+    // parked captures swap sides with the viewpoint
+    for (const c of ['w', 'b'])
+        parked[c].forEach((m, i) => {
+            const s = parkSlotPos(c, i);
+            m.position.set(s.x, PARK_Y, s.z);
+        });
     controls.update();
 }
 
@@ -577,14 +745,21 @@ function rebuildCoords() {
 
 function tick() {
     const dt = Math.min(clock.getDelta(), 0.05);
+    elapsed += dt;
     const SPEED = 3.2;
     for (let i = animations.length - 1; i >= 0; i--) {
         const a = animations[i];
         a.t += dt * SPEED;
-        if (a.kind === 'move') {
+        if (a.kind === 'move' || a.kind === 'park') {
             const k = easeOut(Math.min(a.t, 1));
             a.mesh.position.lerpVectors(a.from, a.to, k);
-            a.mesh.position.y = PIECE_Y + Math.sin(Math.min(a.t, 1) * Math.PI) * 0.35; // hop
+            a.mesh.position.y += Math.sin(Math.min(a.t, 1) * Math.PI) * (a.kind === 'park' ? 0.55 : 0.35); // hop
+            if (a.toRot !== undefined) a.mesh.rotation.z = a.toRot * k; // knocked-over fall
+            if (a.t >= 1) animations.splice(i, 1);
+        } else if (a.kind === 'drop') {
+            const k = a.t < 0 ? 0 : easeOut(Math.min(a.t, 1));
+            a.mesh.position.lerpVectors(a.from, a.to, k);
+            if (a.toRot !== undefined) a.mesh.rotation.z = a.toRot * k;
             if (a.t >= 1) animations.splice(i, 1);
         } else if (a.kind === 'fade') {
             const k = Math.min(a.t * 1.4, 1);
@@ -612,6 +787,49 @@ function tick() {
             }
         }
     }
+
+    // ambient life: dust drifts, the camera leans gently toward the pointer,
+    // and the piece under the cursor rises a touch off its square
+    if (dust) {
+        const p = dust.geometry.attributes.position.array, s = dust.userData.seed;
+        for (let i = 0; i < s.length; i++) {
+            p[i * 3] += Math.sin(elapsed * 0.12 + s[i]) * 0.0016;
+            p[i * 3 + 2] += Math.cos(elapsed * 0.1 + s[i] * 1.7) * 0.0016;
+            p[i * 3 + 1] += Math.sin(elapsed * 0.2 + s[i] * 2.3) * 0.0009;
+        }
+        dust.geometry.attributes.position.needsUpdate = true;
+    }
+    const pk = Math.min(dt * 4, 1);
+    controls.target.x += ((parallax.x * 0.28) - controls.target.x) * pk;
+    controls.target.y += ((-1.0 - parallax.y * 0.12) - controls.target.y) * pk;
+    // captures parked off-board: if any parked piece leaves the frame, the
+    // camera breathes out on its own until the row is visible again
+    if (parked.w.length || parked.b.length) {
+        const v = new THREE.Vector3();
+        let out = false;
+        for (const c of ['w', 'b']) {
+            for (const m of parked[c]) {
+                v.copy(m.position); v.y += 0.5;
+                v.project(camera);
+                if (Math.abs(v.x) > 0.96 || Math.abs(v.y) > 0.97) { out = true; break; }
+            }
+            if (out) break;
+        }
+        const cur = camera.position.distanceTo(controls.target);
+        // unless the player zoomed in deliberately (they chose the crop)
+        if (out && cur > fitDistance() * 0.9 && cur < controls.maxDistance) {
+            const dirN = camera.position.clone().sub(controls.target).normalize();
+            camera.position.copy(controls.target).addScaledVector(dirN, Math.min(cur * (1 + dt * 1.8), controls.maxDistance));
+            autoZoomed = true;
+        }
+    }
+    for (const sq of Object.keys(pieceMeshes)) {
+        const m = pieceMeshes[sq];
+        if (animations.some(a => a.mesh === m) || (drag && drag.mesh === m)) continue;
+        const ty = PIECE_Y + (m.userData.lift ? 0.07 : 0);
+        if (Math.abs(m.position.y - ty) > 0.001)
+            m.position.y += (ty - m.position.y) * Math.min(dt * 12, 1);
+    }
     controls.update();
     renderer.render(scene, camera);
 }
@@ -629,6 +847,36 @@ function fitDistance() {
     return Math.max(halfH / Math.tan(v), halfW / (Math.tan(v) * camera.aspect)) * 1.03;
 }
 
+// anchor sets: the board itself (frame, coordinate strip, piece tops) always
+// fits; the parked-capture rows only bound the max zoom-out so the default
+// view stays tight on the board and breathes out when material is taken
+const BASE_ANCHORS = [
+    [-4.95, 0, 5.15], [4.95, 0, 5.15], [-4.95, 0, -5.15], [4.95, 0, -5.15],
+    [0, 1.5, -3.7], [0, 1.4, 3.7],
+];
+const PARK_ANCHORS = [
+    [-4.4, 0.7, 6.35], [4.4, 0.7, 6.35], [-4.4, 0.7, -6.35], [4.4, 0.7, -6.35],
+];
+
+// step the camera out along its view axis until every anchor projects inside
+// the viewport — anchors beat a flat half-extent because the near edge
+// foreshortens differently at narrow aspects
+function anchorDist(anchors, dist) {
+    const dirN = camera.position.clone().sub(controls.target).normalize();
+    const probe = new THREE.Vector3();
+    for (let i = 0; i < 20; i++) {
+        camera.position.copy(controls.target).addScaledVector(dirN, dist);
+        camera.updateMatrixWorld(); // refresh matrixWorldInverse for .project()
+        camera.updateProjectionMatrix();
+        if (anchors.every(([x, y, z]) => {
+            probe.set(x, y, z).project(camera);
+            return Math.abs(probe.x) <= 0.96 && Math.abs(probe.y) <= 0.97;
+        })) break;
+        dist *= 1.04;
+    }
+    return dist;
+}
+
 function resize() {
     // measure the canvas itself: the parent's clientWidth includes padding
     // (mobile right gutter for the eval pill), which would corrupt aspect
@@ -636,33 +884,16 @@ function resize() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    // keep board fully visible: push the camera out until every anchor —
-    // frame corners incl the coordinate-label strip plus the tallest piece
-    // tops — projects inside the viewport. Anchors beat a flat half-extent
-    // because the near edge foreshortens differently at narrow aspects.
-    const ANCHORS = [
-        [-4.95, 0, 4.95], [4.95, 0, 4.95], [-4.95, 0, -4.8], [4.95, 0, -4.8],
-        [0, 1.5, -3.7], [0, 1.4, 3.7],
-    ];
-    const dirN = camera.position.clone().sub(controls.target).normalize();
     // a stale view offset from the previous resize() would poison the anchor
     // probe below — clear it, then re-solve after the distance is final
     camera.clearViewOffset();
     camera.updateProjectionMatrix();
-    let dist = Math.max(camera.position.distanceTo(controls.target), fitDistance());
-    const probe = new THREE.Vector3();
-    for (let i = 0; i < 20; i++) {
-        camera.position.copy(controls.target).addScaledVector(dirN, dist);
-        camera.updateMatrixWorld(); // refresh matrixWorldInverse for .project()
-        camera.updateProjectionMatrix();
-        if (ANCHORS.every(([x, y, z]) => {
-            probe.set(x, y, z).project(camera);
-            return Math.abs(probe.x) <= 0.96 && Math.abs(probe.y) <= 0.97;
-        })) break;
-        dist *= 1.04;
-    }
+    const dirN = camera.position.clone().sub(controls.target).normalize();
+    const dist = anchorDist(BASE_ANCHORS, Math.max(camera.position.distanceTo(controls.target), fitDistance()));
+    const parkDist = anchorDist(BASE_ANCHORS.concat(PARK_ANCHORS), dist);
+    camera.position.copy(controls.target).addScaledVector(dirN, dist); // settle on board fit
     controls.minDistance = 5;
-    controls.maxDistance = dist * 1.15; // zoom allowed, never smaller than full view
+    controls.maxDistance = Math.max(dist, parkDist) * 1.15; // zoom allowed; parked rows always reachable
     // view offset lifts the projected board toward vertical centre — the fit
     // leaves room for the top clock, so raw centering lands the board low.
     // Probe the projected midpoint of the board's far/near edges (the near
@@ -681,6 +912,11 @@ function resize() {
     if (Math.abs(slope) > 1e-6)
         camera.setViewOffset(w, h, 0, Math.round((0.5 - y0) / slope), w, h);
     controls.update();
+    // hand the eval pill the board's projected left edge so it hugs the board
+    // however wide the table fills around it
+    const px = (new THREE.Vector3(-4.62, 0, 0).project(camera).x * 0.5 + 0.5) * w;
+    const cr = canvas.getBoundingClientRect(), pr = canvas.parentElement.getBoundingClientRect();
+    canvas.style.setProperty('--board-left', Math.max(8, Math.round(px + cr.left - pr.left - 26)) + 'px');
 }
 
 // ---- procedural sounds (WebAudio, no assets) ----
@@ -811,5 +1047,5 @@ export function copyText(text) {
 }
 
 // bridge for debugging & legacy callers (primary path is IJSObjectReference)
-globalThis.chess3d = { initScene, setPieces, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
+globalThis.chess3d = { initScene, setPieces, setCaptured, applyMove, setHighlights, flipBoard, setOrientation, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
     _setupFen: (fen) => dotNet?.invokeMethodAsync('DebugSetupFen', fen) };

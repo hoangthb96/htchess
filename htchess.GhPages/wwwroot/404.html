@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/htchess/" />
+    <title>htchess — cờ vua 3D</title>
+    <link rel="stylesheet" href="_content/htchess.Shared/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="_content/htchess.Shared/app.css" />
+    <link rel="stylesheet" href="htchess.GhPages.styles.css" />
+    <link rel="icon" type="image/png" href="_content/htchess.Shared/favicon.png" />
+    <style>
+        /* first paint before the WASM bundle boots */
+        body { margin: 0; background: #14161b; }
+        .boot {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #8b93a3;
+            font: 500 1rem/1.4 system-ui, sans-serif;
+            letter-spacing: 0.02em;
+        }
+        .boot span { animation: bootpulse 1.6s ease-in-out infinite; }
+        @keyframes bootpulse { 50% { opacity: 0.45; } }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <div class="boot"><span>♞ Đang tải bàn cờ…</span></div>
+    </div>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

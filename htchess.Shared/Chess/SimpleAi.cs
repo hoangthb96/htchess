@@ -3,7 +3,7 @@ using Rudzoft.ChessLib.MoveGeneration;
 using Rudzoft.ChessLib.Types;
 using Rudzoft.ChessLib.Enums;
 
-namespace htchess.Client.Chess;
+namespace htchess.Shared.Chess;
 
 /// Negamax + alpha-beta over ChessLib position. Material + piece-square eval.
 /// Operates directly on the session's position (make/take), so call it when

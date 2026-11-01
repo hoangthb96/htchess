@@ -1,0 +1,10 @@
+<Router AppAssembly="@typeof(htchess.Shared.Pages.Chess).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <p style="padding: 2rem; color: #b7bdc9">Trang không tồn tại — <a href="./">về bàn cờ</a>.</p>
+        </LayoutView>
+    </NotFound>
+</Router>

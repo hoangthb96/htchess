@@ -1,0 +1,33 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <input type="checkbox" id="nav-cb" class="nav-cb" title="Navigation menu" />
+    <label for="nav-cb" class="nav-toggle" title="Menu"></label>
+    <label for="nav-cb" class="nav-backdrop"></label>
+    <div class="sidebar">
+        <div class="top-row">
+            <a class="navbar-brand" href="./">htchess</a>
+        </div>
+        <nav class="nav-list">
+            <a class="nav-link active" href="./">♞ Cờ vua 3D</a>
+            <a class="nav-link" href="https://github.com/hoangthb96/htchess" target="_blank" rel="noopener">⌥ Mã nguồn (GitHub)</a>
+        </nav>
+        <div class="nav-foot">
+            Demo vibecoding — game được dựng bằng AI agent
+            (<a href="https://devin.ai" target="_blank" rel="noopener">Devin</a>),
+            con người chỉ đạo và review.
+        </div>
+    </div>
+
+    <main>
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Đã có lỗi xảy ra.
+    <a href="." class="reload">Tải lại</a>
+    <span class="dismiss">🗙</span>
+</div>

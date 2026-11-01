@@ -6,7 +6,7 @@ using Rudzoft.ChessLib.Notation.Notations;
 using Rudzoft.ChessLib.Types;
 using Rudzoft.ChessLib.Enums;
 
-namespace htchess.Client.Chess;
+namespace htchess.Shared.Chess;
 
 /// Wraps ChessLib: board state, selection, modes, undo, move list.
 public sealed class GameSession
@@ -517,10 +517,16 @@ public sealed class GameSession
 
     /// Captured pieces from the move history — exact for FEN setups, promotions and undo.
     /// Uppercase chars = black victims (filled glyphs), lowercase = white victims.
-    public List<string> CapturedByWhite() => Captured(victimWhite: false);
-    public List<string> CapturedByBlack() => Captured(victimWhite: true);
+    public List<string> CapturedByWhite() => CapturedByWhite(int.MaxValue);
+    public List<string> CapturedByBlack() => CapturedByBlack(int.MaxValue);
 
-    private List<string> Captured(bool victimWhite) => _history
+    /// Captures as of a given ply — used while reviewing so the parked pieces
+    /// on the table match the position being viewed.
+    public List<string> CapturedByWhite(int uptoPly) => Captured(victimWhite: false, uptoPly);
+    public List<string> CapturedByBlack(int uptoPly) => Captured(victimWhite: true, uptoPly);
+
+    private List<string> Captured(bool victimWhite, int uptoPly = int.MaxValue) => _history
+        .Take(uptoPly)
         .Where(h => h.Victim is not null && (h.Victim.Color == "w") == victimWhite)
         .Select(h => victimWhite ? h.Victim!.Type.ToLowerInvariant() : h.Victim!.Type)
         .ToList();
