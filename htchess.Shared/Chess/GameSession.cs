@@ -43,7 +43,8 @@ public sealed class GameSession
 
     private IPosition Pos => _game.Pos;
 
-    /// Live position for the AI (it makes/takes moves in place — call only between turns).
+    /// Live position for synchronous reads (eval bar, checks). The AI searches its
+    /// own game from CurrentFen instead — this object is never made/taken by the search.
     public IPosition Position => _game.Pos;
 
     public bool WhiteToMove => Pos.SideToMove.IsWhite;
@@ -534,12 +535,13 @@ public sealed class GameSession
                 (m.ToSquare().ToString() == uci[2..4] || DisplayTarget(m) == uci[2..4]));
             if (uci.Length == 5)
             {
-                var want = uci[4] switch
+                var want = char.ToLowerInvariant(uci[4]) switch
                 {
                     'q' => PieceTypes.Queen,
                     'r' => PieceTypes.Rook,
                     'b' => PieceTypes.Bishop,
-                    _ => PieceTypes.Knight,
+                    'n' => PieceTypes.Knight,
+                    _ => throw new InvalidOperationException($"Illegal promotion suffix in replay: {uci}"),
                 };
                 candidates = candidates.Where(m => m.PromotedPieceType() == want);
             }

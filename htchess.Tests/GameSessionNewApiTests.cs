@@ -84,6 +84,50 @@ public class GameSessionNewApiTests
     }
 
     [Fact]
+    public void Replay_throws_on_unknown_promotion_suffix()
+    {
+        var s = new GameSession();
+        Assert.Throws<InvalidOperationException>(() =>
+            s.NewGameFromMoves("8/P6k/8/8/8/8/8/K7 w - - 0 1",
+                GameMode.TwoPlayer, true, new[] { "a7a8x" }));
+    }
+
+    [Fact]
+    public void Replay_accepts_uppercase_promotion_suffix()
+    {
+        var s = new GameSession();
+        s.NewGameFromMoves("8/P6k/8/8/8/8/8/K7 w - - 0 1",
+            GameMode.TwoPlayer, true, new[] { "a7a8Q" });
+        Assert.Contains(s.GetPosition(), p => p.Square == "a8" && p.Type == "Q");
+    }
+
+    [Fact]
+    public async Task Ai_search_leaves_live_position_untouched()
+    {
+        var s = new GameSession();
+        var before = s.CurrentFen;
+        var move = await new SimpleAi().FindBestAsync(s.CurrentFen, 2);
+        Assert.NotNull(move);
+        Assert.Equal(before, s.CurrentFen);
+        s.ApplyMove(move.GetValueOrDefault());
+        Assert.Equal(1, s.PlyCount);
+    }
+
+    [Fact]
+    public async Task Ai_finds_mate_in_one()
+    {
+        // scholar's mate pattern — Qxf7# is the only mate
+        var s = new GameSession();
+        s.NewGameFromFen("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 4",
+            GameMode.TwoPlayer, true);
+        var move = await new SimpleAi().FindBestAsync(s.CurrentFen, 2);
+        Assert.NotNull(move);
+        s.ApplyMove(move.GetValueOrDefault());
+        Assert.True(s.IsGameOver);
+        Assert.Equal("1-0", s.ResultTag);
+    }
+
+    [Fact]
     public void DraggableSquares_are_legal_sources_on_human_turn()
     {
         var s = new GameSession();

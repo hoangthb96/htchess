@@ -255,6 +255,8 @@
     private bool _drawDeclined;
     private int _aiDepth = 3;
     private int _viewPly = -1; // -1 = live board, >=0 = reviewing that ply
+    private bool _scrollPending; // scrollMoveList runs in OnAfterRender so the new row exists
+    private string? _appliedFen;
     private string _fenInput = "";
     private bool _fenError;
     private bool _muted;
@@ -303,9 +305,28 @@
 
     protected override void OnInitialized() => RefreshCaches();
 
+    protected override async Task OnParametersSetAsync()
+    {
+        // in-app nav can swap ?fen= on a mounted component — re-apply when it changes
+        if (string.IsNullOrWhiteSpace(fen) || fen == _appliedFen) return;
+        _appliedFen = fen;
+        if (_module is null) return; // pre-first-render: OnAfterRenderAsync applies it below
+        _fenInput = fen;
+        await SetupFen();
+        _setupOpen = false;
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (!firstRender)
+        {
+            if (_scrollPending)
+            {
+                _scrollPending = false;
+                await Js("scrollMoveList");
+            }
+            return;
+        }
         for (var attempt = 0; attempt < 3 && _module is null; attempt++)
         {
             try
@@ -346,6 +367,7 @@
         if (!string.IsNullOrWhiteSpace(fen))
         {
             _fenInput = fen;
+            _appliedFen = fen;
             await SetupFen();
             _setupOpen = false; // a shared link must not land on the new-game card — "Chơi" would discard the FEN
         }
@@ -474,9 +496,9 @@
             new { capturedSquare = m.CapturedSquare, rookFrom = m.RookFrom, rookTo = m.RookTo, promoteTo = m.PromoteTo });
         await Js("setCaptured", _session.CapturedByBlack(), _session.CapturedByWhite());
         await PlayMoveSound(m);
+        _scrollPending = true;
         await PushHighlights();
         await MaybeAiMove();
-        await Js("scrollMoveList");
         await SaveGame();
     }
 
@@ -495,7 +517,7 @@
         if (_session.Mode != GameMode.VsAi || _session.SideToMoveIsHuman || _session.IsGameOver) { await TryPremove(); return; }
         _aiThinking = true;
         StateHasChanged();
-        var move = await _ai.FindBestAsync(_session.Position, _aiDepth);
+        var move = await _ai.FindBestAsync(_session.CurrentFen, _aiDepth);
         _aiThinking = false;
         if (move is not null && !_session.IsGameOver)
         {
@@ -539,12 +561,13 @@
             await Js("setPieces", pieces);
             await Js("setCaptured", _session.CapturedByBlack(_viewPly), _session.CapturedByWhite(_viewPly));
         }
-        else { await SyncPieces(); await Js("scrollMoveList"); }
+        else { await SyncPieces(); _scrollPending = true; }
         await PushHighlights();
     }
 
     private async Task SetupFen()
     {
+        if (_aiThinking) return; // resetting mid-search would invalidate the pending move
         _fenError = false;
         try
         {
@@ -645,6 +668,7 @@
 
     private async Task NewGameClick()
     {
+        if (_aiThinking) return; // resetting mid-search would invalidate the pending move
         // mid-game resets are destructive: same two-step affordance as resign/draw
         var midGame = _session.PlyCount > 0 && !_session.IsGameOver;
         if (midGame && !_confirmNew)
@@ -687,6 +711,7 @@
 
     private async Task NewGame()
     {
+        if (_aiThinking) return; // covers the end-overlay replay and StartFromSetup too
         var (mode, humanWhite) = ResolveMode();
         _session.NewGame(mode, humanWhite);
         _confirmResign = _confirmDraw = _confirmNew = _drawDeclined = false;
@@ -737,6 +762,7 @@
 
     private async Task Undo()
     {
+        if (_aiThinking) return; // button is already disabled; this covers JS-invoked paths
         _session.Undo();
         await SyncBoard();
         await SaveGame();
@@ -778,6 +804,11 @@
         sb.Append("[White \"").Append(white).AppendLine("\"]");
         sb.Append("[Black \"").Append(black).AppendLine("\"]");
         sb.Append("[Result \"").Append(result).AppendLine("\"]");
+        if (_session.StartFen != Rudzoft.ChessLib.Fen.Fen.StartPositionFen)
+        {
+            sb.AppendLine("[SetUp \"1\"]");
+            sb.Append("[FEN \"").Append(_session.StartFen).AppendLine("\"]");
+        }
         sb.AppendLine();
         var hist = _session.History;
         for (var i = 0; i < hist.Count; i++)
@@ -894,23 +925,47 @@
     }
 
     /// Resume the locally saved game, if one with actual moves exists.
+    /// A corrupt entry is dropped and the setup screen shows instead.
     private async Task RestoreGame()
     {
-        var saved = await StoreGet<SavedGame>("load", "htchess.game");
+        SavedGame? saved;
+        try
+        {
+            saved = await StoreGet<SavedGame>("load", "htchess.game");
+        }
+        catch (Exception)
+        {
+            // unreadable/tampered entry — drop it so every load doesn't retry it
+            await Store("clear", "htchess.game");
+            return;
+        }
         if (saved?.Moves is not { Count: > 0 }) return;
-        _modePick = saved.ModePick ?? _modePick;
-        _flipped = saved.Flipped;
-        _tcPick = saved.TcPick ?? _tcPick;
-        _whiteMs = saved.WhiteMs;
-        _blackMs = saved.BlackMs;
-        _incMs = saved.IncMs;
-        _clockStarted = saved.ClockStarted && !saved.Over;
-        // ResolveMode re-rolls ai-r's random side — the saved side is the truth.
-        var mode = _modePick == "2p" ? GameMode.TwoPlayer : GameMode.VsAi;
-        _session.NewGameFromMoves(saved.StartFen, mode, saved.HumanWhite, saved.Moves);
-        _setupOpen = false;
-        await Js("setOrientation", !_flipped);
-        await SyncBoard();
+        if (saved.Over)
+        {
+            // a finished game must not resume as live
+            await Store("clear", "htchess.game");
+            return;
+        }
+        try
+        {
+            _modePick = saved.ModePick ?? _modePick;
+            _flipped = saved.Flipped;
+            _tcPick = saved.TcPick ?? _tcPick;
+            _whiteMs = saved.WhiteMs;
+            _blackMs = saved.BlackMs;
+            _incMs = saved.IncMs;
+            _clockStarted = saved.ClockStarted;
+            // ResolveMode re-rolls ai-r's random side — the saved side is the truth.
+            var mode = _modePick == "2p" ? GameMode.TwoPlayer : GameMode.VsAi;
+            _session.NewGameFromMoves(saved.StartFen, mode, saved.HumanWhite, saved.Moves);
+            _setupOpen = false;
+            await Js("setOrientation", !_flipped);
+            await SyncBoard();
+        }
+        catch (Exception)
+        {
+            await Store("clear", "htchess.game");
+        }
     }
 
     private sealed class SavedGame
