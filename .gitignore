@@ -490,3 +490,7 @@ nul
 # Local publish/test output
 gh-out/
 gh-serve/
+
+# Devin local overrides
+.devin/config.local.json
+gh-out-int/

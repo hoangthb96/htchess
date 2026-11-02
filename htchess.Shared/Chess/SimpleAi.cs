@@ -1,13 +1,14 @@
 using Rudzoft.ChessLib;
+using Rudzoft.ChessLib.Factories;
 using Rudzoft.ChessLib.MoveGeneration;
 using Rudzoft.ChessLib.Types;
 using Rudzoft.ChessLib.Enums;
 
 namespace htchess.Shared.Chess;
 
-/// Negamax + alpha-beta over ChessLib position. Material + piece-square eval.
-/// Operates directly on the session's position (make/take), so call it when
-/// it's the AI's turn and apply the returned move via GameSession.ApplyMove.
+/// Negamax + alpha-beta over ChessLib. Material + piece-square eval.
+/// Searches on its own game built from the caller's FEN, so Task.Yield pauses
+/// can't corrupt the live board; apply the returned move via GameSession.ApplyMove.
 public sealed class SimpleAi
 {
     private const int Mate = 100_000;
@@ -133,8 +134,11 @@ public sealed class SimpleAi
         return s;
     }
 
-    public async Task<Move?> FindBestAsync(IPosition pos, int depth)
+    public async Task<Move?> FindBestAsync(string fen, int depth)
     {
+        var game = GameFactory.Create();
+        game.NewGame(fen);
+        var pos = game.Pos;
         Nodes = 0;
         var moves = OrderedLegal(pos);
         if (moves.Count == 0) return null;
@@ -148,7 +152,12 @@ public sealed class SimpleAi
         {
             var st = new State();
             pos.MakeMove(m, in st);
-            var score = -Negamax(pos, depth - 1, -Mate * 2, -alpha, 1);
+            var score = -await Negamax(pos, depth - 1, -Mate * 2, -alpha, 1);
+            // a reported score equal to bestScore may be a proving-window bound
+            // (child failed high), not a true tie — re-search open-windowed so a
+            // bound can't displace a genuinely better move
+            if (best is not null && score == bestScore)
+                score = -await Negamax(pos, depth - 1, -Mate * 2, Mate * 2, 1);
             pos.TakeMove(m);
 
             if (score > bestScore || (score == bestScore && _rng.Next(2) == 0))
@@ -163,7 +172,7 @@ public sealed class SimpleAi
         return best;
     }
 
-    private int Negamax(IPosition pos, int depth, int alpha, int beta, int ply)
+    private async Task<int> Negamax(IPosition pos, int depth, int alpha, int beta, int ply)
     {
         Nodes++;
         var moves = new MoveList();
@@ -171,7 +180,9 @@ public sealed class SimpleAi
         if (moves.Length == 0)
             return pos.InCheck ? -Mate + ply : 0;
         if (pos.Rule50 >= 100 || pos.IsRepetition) return 0;
-        if (depth <= 0) return Evaluate(pos);
+        // yield on deep subtrees so the single WASM thread can pump the UI
+        if (depth >= 2 && (Nodes & 1023) == 0) await Task.Yield();
+        if (depth <= 0) return Quiesce(pos, alpha, beta, 0);
 
         var ordered = new List<Move>(moves.Length);
         foreach (var em in moves) ordered.Add(em.Move);
@@ -182,13 +193,51 @@ public sealed class SimpleAi
         {
             var st = new State();
             pos.MakeMove(m, in st);
-            var score = -Negamax(pos, depth - 1, -beta, -alpha, ply + 1);
+            var score = -await Negamax(pos, depth - 1, -beta, -alpha, ply + 1);
             pos.TakeMove(m);
             if (score > bestScore) bestScore = score;
             if (score > alpha) alpha = score;
             if (alpha >= beta) break;
         }
         return bestScore;
+    }
+
+    private int Quiesce(IPosition pos, int alpha, int beta, int qply)
+    {
+        Nodes++;
+        var inCheck = pos.InCheck;
+        var moves = new MoveList();
+        moves.Generate(in pos, MoveGenerationType.Legal);
+        if (moves.Length == 0)
+            return inCheck ? -Mate + qply : 0;
+        if (!inCheck)
+        {
+            // standing pat is illegal while in check — evasions only there
+            var standPat = Evaluate(pos);
+            if (standPat >= beta) return beta;
+            if (standPat > alpha) alpha = standPat;
+        }
+        if (qply >= 6) return alpha;
+        // in check every legal move is an evasion; otherwise captures only
+        // (incl. en passant + promos) to bound the tree
+        var caps = new List<Move>(moves.Length);
+        foreach (var em in moves)
+        {
+            var m = em.Move;
+            if (inCheck || pos.GetPiece(m.ToSquare()) != Piece.EmptyPiece || m.IsEnPassantMove() || m.IsPromotionMove())
+                caps.Add(m);
+        }
+        caps.Sort((a, b) => OrderScore(pos, b) - OrderScore(pos, a));
+        foreach (var m in caps)
+        {
+            var st = new State();
+            pos.MakeMove(m, in st);
+            var score = -Quiesce(pos, -beta, -alpha, qply + 1);
+            pos.TakeMove(m);
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+        }
+        return alpha;
     }
 
     private static List<Move> OrderedLegal(IPosition pos)

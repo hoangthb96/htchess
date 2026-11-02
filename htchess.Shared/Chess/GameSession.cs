@@ -43,7 +43,8 @@ public sealed class GameSession
 
     private IPosition Pos => _game.Pos;
 
-    /// Live position for the AI (it makes/takes moves in place — call only between turns).
+    /// Live position for synchronous reads (eval bar, checks). The AI searches its
+    /// own game from CurrentFen instead — this object is never made/taken by the search.
     public IPosition Position => _game.Pos;
 
     public bool WhiteToMove => Pos.SideToMove.IsWhite;
@@ -260,6 +261,14 @@ public sealed class GameSession
         // clicked a legal target of current selection (incl. own-rook castle squares)
         if (Selected is not null && FindCandidates(Selected, squareName).Count > 0)
             return TryCommit(Selected, squareName, null);
+
+        // re-clicking the selected piece deselects it
+        if (Selected == squareName)
+        {
+            Selected = null;
+            SelectedTargets.Clear();
+            return new(ClickResult.Deselected);
+        }
 
         // clicked own piece -> select
         if (piece != Piece.EmptyPiece && piece.ColorOf().IsWhite == WhiteToMove)
@@ -491,6 +500,65 @@ public sealed class GameSession
     }
 
     public IReadOnlyList<Move> LegalMoves => _legal;
+
+    /// Current position FEN.
+    public string CurrentFen => Pos.FenNotation;
+
+    /// FEN the current game started from (index 0 of fen list).
+    public string StartFen => _fens.Count > 0 ? _fens[0] : Pos.FenNotation;
+
+    /// UCI strings of all played moves ("e2e4", castle king->rook e.g. "e1h1", promo suffix "e7e8q").
+    public IReadOnlyList<string> UciMoves => _history.Select(h => ToUci(h.Move)).ToList();
+
+    /// Squares whose pieces may be dragged now: legal from-squares when human to move,
+    /// human's own piece squares when AI to move (premove), empty when game over.
+    public List<string> DraggableSquares()
+    {
+        if (IsGameOver || AwaitingPromotion) return new();
+        if (SideToMoveIsHuman)
+            return _legal.Select(m => m.FromSquare().ToString()).Distinct().ToList();
+        return GetPosition()
+            .Where(p => p.Color == (HumanIsWhite ? "w" : "b"))
+            .Select(p => p.Square)
+            .ToList();
+    }
+
+    /// Rebuild a game from a start FEN + UCI move list (save/load, replay).
+    /// Throws InvalidOperationException on the first illegal move.
+    public void NewGameFromMoves(string? startFen, GameMode mode, bool humanIsWhite, IReadOnlyList<string> uciMoves)
+    {
+        ResetTo(mode, humanIsWhite, startFen);
+        foreach (var uci in uciMoves)
+        {
+            var candidates = _legal.Where(m =>
+                m.FromSquare().ToString() == uci[0..2] &&
+                (m.ToSquare().ToString() == uci[2..4] || DisplayTarget(m) == uci[2..4]));
+            if (uci.Length == 5)
+            {
+                var want = char.ToLowerInvariant(uci[4]) switch
+                {
+                    'q' => PieceTypes.Queen,
+                    'r' => PieceTypes.Rook,
+                    'b' => PieceTypes.Bishop,
+                    'n' => PieceTypes.Knight,
+                    _ => throw new InvalidOperationException($"Illegal promotion suffix in replay: {uci}"),
+                };
+                candidates = candidates.Where(m => m.PromotedPieceType() == want);
+            }
+            var list = candidates.ToList();
+            if (list.Count == 0)
+                throw new InvalidOperationException($"Illegal move in replay: {uci}");
+            ApplyMove(list[0]);
+        }
+    }
+
+    private static string ToUci(Move m)
+    {
+        var uci = m.FromSquare().ToString() + m.ToSquare().ToString();
+        return m.IsPromotionMove()
+            ? uci + char.ToLowerInvariant(TypeChar(m.PromotedPieceType())[0])
+            : uci;
+    }
 
     /// Undo n plies (default: 1 in 2P mode, 2 vs AI so the human gets the turn back).
     public void Undo()
