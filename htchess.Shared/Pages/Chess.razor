@@ -347,6 +347,7 @@
         {
             _fenInput = fen;
             await SetupFen();
+            _setupOpen = false; // a shared link must not land on the new-game card — "Chơi" would discard the FEN
         }
         else
         {
