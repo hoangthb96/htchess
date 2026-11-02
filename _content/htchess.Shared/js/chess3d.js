@@ -83,6 +83,10 @@ function knightHeadGeo() {
         pos.setZ(i, z * (1 - 0.42 * t));
     }
     geo.computeVertexNormals();
+    // slight forward head tilt — alert Staunton pose, pivot near the neck
+    geo.translate(0, -0.12, 0);
+    geo.rotateZ(-0.09);
+    geo.translate(0, 0.12, 0);
     return geo;
 }
 
@@ -103,6 +107,10 @@ function maneGeo() {
         bevelSize: 0.015, bevelSegments: 2, curveSegments: 8,
     });
     geo.translate(0, 0, -0.04);
+    // match the head's forward tilt so the fin stays glued to the crest
+    geo.translate(0, -0.12, 0);
+    geo.rotateZ(-0.09);
+    geo.translate(0, 0.12, 0);
     return geo;
 }
 
@@ -161,7 +169,7 @@ function buildStaunton(type, mat, detail, white) {
             const eye = ball(0.02, 8);
             for (const zc of [-0.077, 0.077]) {
                 const e = new THREE.Mesh(eye, detail);
-                e.position.set(0.105, 0.40, zc / 0.78); // z applied pre-scale, half-embedded
+                e.position.set(0.130, 0.39, zc / 0.78); // follows the head's forward tilt
                 head.add(e);
             }
             break;
@@ -305,8 +313,8 @@ const PIECE_THEMES = {
         mats: () => {
             const bump = woodBump();
             return [
-                new THREE.MeshStandardMaterial({ color: 0xefe4c9, roughness: 0.48, metalness: 0.05, envMapIntensity: 0.35, bumpMap: bump, bumpScale: 0.25 }),
-                new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.36, metalness: 0.18, envMapIntensity: 0.55, bumpMap: bump, bumpScale: 0.35 }),
+                new THREE.MeshPhysicalMaterial({ color: 0xefe4c9, roughness: 0.48, metalness: 0.05, envMapIntensity: 0.35, bumpMap: bump, bumpScale: 0.25, clearcoat: 0.5, clearcoatRoughness: 0.35 }),
+                new THREE.MeshPhysicalMaterial({ color: 0x2c2620, roughness: 0.36, metalness: 0.18, envMapIntensity: 0.55, bumpMap: bump, bumpScale: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.3 }),
                 new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6, envMapIntensity: 0.3 }),
             ];
         },
@@ -515,6 +523,15 @@ export function initScene(canvasEl, dotNetRef) {
     frame.position.y = -0.16;
     frame.receiveShadow = true;
     scene.add(frame);
+
+    // maple inlay band between squares and frame — the detail real boards have
+    const inlay = new THREE.Mesh(
+        new THREE.BoxGeometry(8 * SQ + 0.32, 0.03, 8 * SQ + 0.32),
+        new THREE.MeshStandardMaterial({ color: 0x8a6b48, roughness: 0.55 })
+    );
+    inlay.position.y = -0.016;
+    inlay.receiveShadow = true;
+    scene.add(inlay);
 
     // walnut table with a warm pool of light under the board
     const table = new THREE.Mesh(
@@ -934,42 +951,45 @@ export function setOrientation(whiteView) {
 
 // ---- board coordinates (a–h, 1–8 on the frame edge) ----
 
-function labelMesh(text) {
+function labelMesh(text, lightSq) {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const x = c.getContext('2d');
-    x.font = '600 44px "Segoe UI", system-ui, sans-serif';
+    x.font = '600 46px "Segoe UI", system-ui, sans-serif';
     x.textAlign = 'center';
     x.textBaseline = 'middle';
-    x.strokeStyle = 'rgba(0,0,0,0.55)';
-    x.lineWidth = 6;
-    x.strokeText(text, 32, 36);
-    x.fillStyle = '#f0e9da';
-    x.fillText(text, 32, 36);
+    // opposite square colour, like lichess in-square coords — no outline needed
+    x.fillStyle = lightSq ? '#a5714f' : '#eacfa4';
+    x.fillText(text, 32, 38);
     const tex = new THREE.CanvasTexture(c);
     tex.anisotropy = 4;
     const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.3, 0.3),
+        new THREE.PlaneGeometry(0.24, 0.24),
         new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
     );
     m.rotation.x = -Math.PI / 2;
     return m;
 }
 
+// in-square corner coordinates (lichess convention): file letters sit in the
+// bottom-left of each near-rank square, rank numbers top-left of each
+// near-file square — they live ON the squares, so perspective can't drift
+// them away from their column the way frame-edge labels did
 function rebuildCoords() {
     if (!coordGroup) return;
     coordGroup.clear();
-    const edge = 8 * SQ / 2 + 0.42; // on the frame border
+    const nearRank = flipped ? 7 : 0, nearFile = flipped ? 7 : 0;
+    const left = flipped ? 0.34 : -0.34;  // x offset toward viewer-left
+    const top = flipped ? 0.34 : -0.34;   // z offset toward viewer-top
     for (let i = 0; i < 8; i++) {
-        const x = (i - 3.5) * SQ, z = (3.5 - i) * SQ;
-        const file = labelMesh(String.fromCharCode(97 + i));       // a–h, bottom edge
-        file.position.set(x, 0.02, flipped ? -edge : edge);
-        if (flipped) file.rotation.z = Math.PI;
-        coordGroup.add(file);
-        const rank = labelMesh(String.fromCharCode(49 + i));       // 1–8, left edge
-        rank.position.set(flipped ? edge : -edge, 0.02, z);
-        if (flipped) rank.rotation.z = Math.PI;
-        coordGroup.add(rank);
+        const f = labelMesh(String.fromCharCode(97 + i), (i + nearRank) % 2 === 1);
+        f.position.set((i - 3.5) * SQ + left, 0.012, (3.5 - nearRank) * SQ - top);
+        if (flipped) f.rotation.z = Math.PI;
+        coordGroup.add(f);
+        const r = labelMesh(String.fromCharCode(49 + i), (nearFile + i) % 2 === 1);
+        r.position.set((nearFile - 3.5) * SQ + left, 0.012, (3.5 - i) * SQ + top);
+        if (flipped) r.rotation.z = Math.PI;
+        coordGroup.add(r);
     }
 }
 
