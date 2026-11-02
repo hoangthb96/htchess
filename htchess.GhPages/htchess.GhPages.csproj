@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <NoDefaultLaunchSettingsFile>true</NoDefaultLaunchSettingsFile>
+    <!-- needs wasm-tools workload: dotnet workload install wasm-tools -->
+    <RunAOTCompilation Condition="'$(Configuration)'=='Release'">true</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>
