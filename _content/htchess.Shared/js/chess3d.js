@@ -71,10 +71,10 @@ function knightHeadGeo() {
     s.quadraticCurveTo(-0.12, 0.33, -0.13, 0.22);         // mane curve
     s.quadraticCurveTo(-0.14, 0.10, -0.11, 0.00);         // neck back
     const geo = new THREE.ExtrudeGeometry(s, {
-        depth: 0.12, bevelEnabled: true, bevelThickness: 0.022,
+        depth: 0.16, bevelEnabled: true, bevelThickness: 0.022,
         bevelSize: 0.02, bevelSegments: 2, curveSegments: 10,
     });
-    geo.translate(0, 0, -0.082); // center on z including bevel
+    geo.translate(0, 0, -0.102); // center on z including bevel
     // sculpt: taper thickness toward the muzzle so the head reads 3D, not slab
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
@@ -167,7 +167,7 @@ function buildStaunton(type, mat, detail, white) {
             mane.castShadow = true;
             head.add(mane);
             const eye = ball(0.02, 8);
-            for (const zc of [-0.077, 0.077]) {
+            for (const zc of [-0.068, 0.068]) {
                 const e = new THREE.Mesh(eye, detail);
                 e.position.set(0.130, 0.39, zc / 0.78); // follows the head's forward tilt
                 head.add(e);
