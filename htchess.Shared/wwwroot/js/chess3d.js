@@ -15,11 +15,11 @@ let pieceMeshes = {};      // 'e4' -> group
 let highlightGroup = null;
 let coordGroup = null;
 let animations = [];
-let pieceGeoCache = {};    // type -> { geo, extras }
 let animId = 0;
 let flipped = false;
 let lastTargets = [];      // cached legal targets of current selection (for drag validation)
 let lastSelected = null;
+let draggables = null;     // squares allowed to start a drag; null = unrestricted
 let drag = null;           // {mesh, from, started, origin:Vector3}
 let hoverSq = null;        // square under cursor while dragging
 let hoverHl = null;        // hover highlight mesh
@@ -392,6 +392,15 @@ function disposePiece(g) {
     g.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
 }
 
+// group.clear() alone drops children without freeing GPU resources
+function disposeChildren(group) {
+    for (const c of group.children) {
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) { c.material.map?.dispose(); c.material.dispose(); }
+    }
+    group.clear();
+}
+
 let lastPieces = null;
 let lastCaptured = { w: [], b: [] };
 
@@ -594,6 +603,9 @@ export function initScene(canvasEl, dotNetRef) {
     highlightGroup = new THREE.Group();
     scene.add(highlightGroup);
 
+    arrowGroup = new THREE.Group();
+    scene.add(arrowGroup);
+
     coordGroup = new THREE.Group();
     scene.add(coordGroup);
     rebuildCoords();
@@ -603,7 +615,7 @@ export function initScene(canvasEl, dotNetRef) {
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerleave', () => { parallax.x = 0; parallax.y = 0; clearHover(); });
+    canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('keydown', onKeyNav);
@@ -654,22 +666,30 @@ function planePoint(e, y = 0) {
 
 function onContextMenu(e) { e.preventDefault(); }
 
+function onPointerLeave() { parallax.x = 0; parallax.y = 0; clearHover(); }
+
 const NAV_KEYS = { ArrowLeft: 'prev', ArrowRight: 'next', ArrowUp: 'start', ArrowDown: 'end', Home: 'start', End: 'end' };
 function onKeyNav(e) {
     if (!dotNet) return;
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
     const dir = NAV_KEYS[e.key];
     if (dir) { e.preventDefault(); dotNet.invokeMethodAsync('NavKey', dir); }
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); dotNet.invokeMethodAsync('FlipKey'); }
 }
 
 function onPointerDown(e) {
     if (!dotNet) return;
-    if (e.button === 2) { dotNet.invokeMethodAsync('RightClicked'); return; }
+    if (e.button === 2) {
+        arrowFrom = squareUnderRay(e); // right-drag may become an arrow
+        dotNet.invokeMethodAsync('RightClicked');
+        return;
+    }
     if (e.button !== 0) return;
+    clearArrows(); // a left click wipes drawn arrows, lichess-style
     const hit = pickAt(e);
     if (hit.kind === 'piece') {
         const mesh = pieceMeshes[hit.sq];
-        if (mesh) {
+        if (mesh && (draggables === null || draggables.includes(hit.sq))) {
             drag = { mesh, from: hit.sq, started: false, origin: mesh.position.clone(), x0: e.clientX, y0: e.clientY };
             controls.enabled = false; // dragging a piece must not orbit the board
         }
@@ -692,13 +712,34 @@ function onPointerMove(e) {
     if (!drag) {
         const r = canvas.getBoundingClientRect();
         if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+            // a release outside the window leaves no pointerup — drop a stale drag
+            if (arrowFrom && !(e.buttons & 2)) {
+                arrowFrom = null;
+                if (arrowDraft) { arrowGroup.remove(arrowDraft); disposeArrow(arrowDraft); arrowDraft = null; }
+            }
             // camera drift: the table lives in 3D, so the view leans a touch
             // with the pointer instead of staying glued down
             const n = ndcFromEvent(e);
             parallax.x = n.x; parallax.y = n.y;
+            if (arrowFrom) {
+                // right-drag: sketch the arrow preview instead of hover-lifting
+                const to = squareUnderRay(e);
+                if (to !== (arrowDraft ? arrowDraft.userData.to : null)) {
+                    if (arrowDraft) { arrowGroup.remove(arrowDraft); disposeArrow(arrowDraft); arrowDraft = null; }
+                    if (to && to !== arrowFrom) {
+                        arrowDraft = buildArrow(arrowFrom, to);
+                        arrowDraft.userData.to = to;
+                        arrowGroup.add(arrowDraft);
+                    }
+                }
+                canvas.style.cursor = '';
+                clearHover();
+                return;
+            }
             const hit = pickAt(e);
-            canvas.style.cursor = hit.kind === 'piece' ? 'grab' : '';
-            const m = hit.kind === 'piece' ? pieceMeshes[hit.sq] : null;
+            const canDrag = hit.kind === 'piece' && (draggables === null || draggables.includes(hit.sq));
+            canvas.style.cursor = canDrag ? 'grab' : '';
+            const m = canDrag ? pieceMeshes[hit.sq] : null;
             if (m !== hoveredMesh) {
                 clearHover();
                 hoveredMesh = m;
@@ -725,7 +766,7 @@ function onPointerMove(e) {
 }
 
 function updateHoverHl() {
-    if (hoverHl) { highlightGroup.remove(hoverHl); hoverHl.geometry.dispose(); hoverHl = null; }
+    if (hoverHl) { highlightGroup.remove(hoverHl); hoverHl.geometry.dispose(); hoverHl.material.dispose(); hoverHl = null; }
     if (hoverSq && drag?.started) {
         const v = sqToVec(hoverSq);
         hoverHl = new THREE.Mesh(
@@ -739,12 +780,33 @@ function updateHoverHl() {
 }
 
 function onPointerUp(e) {
+    if (e.button === 2) {
+        // right-drag ended on another square: toggle the arrow it sketched
+        if (arrowFrom) {
+            const to = scene ? squareUnderRay(e) : null;
+            if (arrowDraft) { arrowGroup.remove(arrowDraft); disposeArrow(arrowDraft); arrowDraft = null; }
+            if (to && to !== arrowFrom) {
+                const key = arrowFrom + '>' + to;
+                if (arrows.has(key)) {
+                    disposeArrow(arrows.get(key));
+                    arrowGroup.remove(arrows.get(key));
+                    arrows.delete(key);
+                } else {
+                    const a = buildArrow(arrowFrom, to);
+                    arrowGroup.add(a);
+                    arrows.set(key, a);
+                }
+            }
+            arrowFrom = null;
+        }
+        return;
+    }
     if (!drag) return;
     const d = drag; drag = null;
     controls.enabled = true;
     canvas.style.cursor = '';
     clearHover(); // hover re-picks on the next move; the dragged mesh keeps no lift
-    if (hoverHl) { highlightGroup.remove(hoverHl); hoverHl.geometry.dispose(); hoverHl = null; }
+    if (hoverHl) { highlightGroup.remove(hoverHl); hoverHl.geometry.dispose(); hoverHl.material.dispose(); hoverHl = null; }
     hoverSq = null;
     if (!d.started) return; // it was a plain click — pointerdown already handled
 
@@ -758,10 +820,66 @@ function onPointerUp(e) {
     if (dropSq && dotNet) dotNet.invokeMethodAsync('SquareClicked', dropSq);
 }
 
+// ---- right-drag arrows (lichess-style) ----
+
+const arrows = new Map();  // 'e2>e4' -> mesh
+let arrowGroup = null;
+let arrowDraft = null;     // preview mesh following the right-drag
+let arrowFrom = null;      // square where the right-drag began
+
+const ARROW_Y = 0.02, ARROW_HEAD = 0.34, ARROW_HEAD_W = 0.30, ARROW_SHAFT_W = 0.10;
+
+// flat ribbon + triangular head lying on the board, drawn along local +x and
+// centred on the origin so the group just positions at the midpoint and yaws
+function buildArrow(from, to) {
+    const a = sqToVec(from), b = sqToVec(to);
+    const len = a.distanceTo(b);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x1a7a36, transparent: true, opacity: 0.55, depthWrite: false,
+    });
+    const g = new THREE.Group();
+    const shaftLen = Math.max(len - ARROW_HEAD, 0.1);
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(shaftLen, ARROW_SHAFT_W), mat);
+    shaft.rotation.x = -Math.PI / 2;
+    shaft.position.x = -len / 2 + shaftLen / 2;
+    g.add(shaft);
+    const shape = new THREE.Shape();
+    shape.moveTo(ARROW_HEAD, 0);
+    shape.lineTo(0, ARROW_HEAD_W / 2);
+    shape.lineTo(0, -ARROW_HEAD_W / 2);
+    shape.closePath();
+    const tip = new THREE.Mesh(new THREE.ShapeGeometry(shape), mat);
+    tip.rotation.x = -Math.PI / 2;
+    tip.position.x = -len / 2 + shaftLen;
+    g.add(tip);
+    g.position.set((a.x + b.x) / 2, ARROW_Y, (a.z + b.z) / 2);
+    g.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+    return g;
+}
+
+function disposeArrow(g) {
+    g.traverse(o => {
+        if (!o.isMesh) return;
+        o.geometry.dispose();
+        if (o.material) { o.material.map?.dispose(); o.material.dispose(); }
+    });
+}
+
+function clearArrows() {
+    if (arrowGroup) {
+        for (const c of [...arrowGroup.children]) disposeArrow(c);
+        arrowGroup.clear();
+    }
+    arrows.clear();
+    arrowDraft = null;
+    arrowFrom = null;
+}
+
 // ---- state sync ----
 
 export function setPieces(pieces) {
     // pieces: [{square:'e4', type:'P', color:'w'|'b'}, ...]
+    clearArrows(); // position changed — drawn arrows refer to stale squares
     lastPieces = pieces;
     const want = {};
     for (const p of pieces) want[p.square] = p;
@@ -855,6 +973,7 @@ function syncPark(color, want) {
 }
 
 export function applyMove(from, to, opts = {}) {
+    clearArrows();
     const mover = pieceMeshes[from];
     if (!mover) return;
 
@@ -898,10 +1017,11 @@ export function applyMove(from, to, opts = {}) {
 }
 
 export function setHighlights(h) {
-    // h: {selected?, targets[], check?, lastMove: [from,to], premove?: [from,to]}
+    // h: {selected?, targets[], check?, lastMove: [from,to], premove?: [from,to], draggables?: [squares]}
     lastSelected = h.selected ?? null;
     lastTargets = h.targets || [];
-    highlightGroup.clear();
+    draggables = h.draggables ?? null;
+    disposeChildren(highlightGroup);
     hoverHl = null;
     if (hoverSq && drag?.started) updateHoverHl();
     const mk = (sq, color, opacity, size = 0.96, y = 0.012) => {
@@ -931,6 +1051,7 @@ export function setHighlights(h) {
 
 export function flipBoard() {
     flipped = !flipped;
+    clearArrows(); // arrows are world-anchored — they'd point wrong side up
     camera.position.z = -camera.position.z;
     controls.target.z = -controls.target.z;
     rebuildCoords();
@@ -977,7 +1098,7 @@ function labelMesh(text, lightSq) {
 // them away from their column the way frame-edge labels did
 function rebuildCoords() {
     if (!coordGroup) return;
-    coordGroup.clear();
+    disposeChildren(coordGroup);
     const nearRank = flipped ? 7 : 0, nearFile = flipped ? 7 : 0;
     const left = flipped ? 0.34 : -0.34;  // x offset toward viewer-left
     const top = flipped ? 0.34 : -0.34;   // z offset toward viewer-top
@@ -1205,7 +1326,16 @@ function thock(vol = 0.3, freq = 420, dur = 0.08, delay = 0) {
     src.start(t);
 }
 
+let muted = false;
+try { muted = localStorage.getItem('htchess.muted') === '1'; } catch { }
+export function setMuted(m) {
+    muted = !!m;
+    try { localStorage.setItem('htchess.muted', muted ? '1' : '0'); } catch { }
+}
+export function getMuted() { return muted; }
+
 export function playSound(name) {
+    if (muted) return;
     try {
         switch (name) {
             case 'select':  tone(1150, 0.03, 'sine', 0.05); break;
@@ -1265,10 +1395,27 @@ export function dispose() {
     resizeObserver?.disconnect();
     canvas?.removeEventListener('pointerdown', onPointerDown);
     canvas?.removeEventListener('pointermove', onPointerMove);
+    canvas?.removeEventListener('pointerleave', onPointerLeave);
     canvas?.removeEventListener('contextmenu', onContextMenu);
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('keydown', onKeyNav);
     controls?.dispose();
+    // free every mesh's GPU resources except the cached theme materials and the
+    // shared wood bump — a remount reuses those
+    if (scene) {
+        const keep = new Set(Object.values(themeMats).flat());
+        scene.traverse(o => {
+            if (!o.isMesh && !o.isPoints) return;
+            o.geometry?.dispose();
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+                if (!m || keep.has(m)) continue;
+                if (m.map && m.map !== _woodBump) m.map.dispose();
+                m.dispose();
+            }
+        });
+        scene.environment?.dispose(); // PMREM render-target texture
+    }
     renderer?.dispose();
     renderer = scene = camera = controls = null;
     pieceMeshes = {};
@@ -1276,6 +1423,27 @@ export function dispose() {
     animations = [];
     drag = null;
     dotNet = null;
+    // module game state back to fresh-mount values — leftovers poison a remount
+    parked = { w: [], b: [] };
+    lastCaptured = { w: [], b: [] };
+    lastPieces = null;
+    flipped = false;
+    lastTargets = [];
+    lastSelected = null;
+    draggables = null;
+    hoveredMesh = null;
+    hoverSq = null;
+    hoverHl = null;
+    autoZoomed = false;
+    elapsed = 0;
+    dust = null;
+    parallax.x = parallax.y = 0;
+    arrows.clear();
+    arrowDraft = null;
+    arrowFrom = null;
+    arrowGroup = null;
+    highlightGroup = null;
+    coordGroup = null;
 }
 
 // debug: ask .NET for session state (needs a JSInvokable DebugState on the page)
@@ -1297,6 +1465,12 @@ export function copyText(text) {
     return Promise.resolve();
 }
 
+// keep the move list pinned to the latest ply after it re-renders
+export function scrollMoveList() {
+    const el = document.querySelector('.movelist');
+    if (el) el.scrollTop = el.scrollHeight;
+}
+
 // bridge for debugging & legacy callers (primary path is IJSObjectReference)
-globalThis.chess3d = { initScene, setPieces, setCaptured, applyMove, setHighlights, flipBoard, setOrientation, setPieceTheme, getPieceTheme, playSound, dispose, _debug, _screenPos, _pick, _state, copyText,
+globalThis.chess3d = { initScene, setPieces, setCaptured, applyMove, setHighlights, flipBoard, setOrientation, setPieceTheme, getPieceTheme, playSound, setMuted, getMuted, scrollMoveList, dispose, _debug, _screenPos, _pick, _state, copyText,
     _setupFen: (fen) => dotNet?.invokeMethodAsync('DebugSetupFen', fen) };
