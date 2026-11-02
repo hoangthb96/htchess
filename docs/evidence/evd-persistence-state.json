@@ -1,0 +1,26 @@
+{
+  "before": {
+    "mode": "TwoPlayer",
+    "humanWhite": true,
+    "whiteToMove": false,
+    "stmHuman": true,
+    "selected": null,
+    "targets": [],
+    "preFrom": null,
+    "preTo": null,
+    "ply": 1,
+    "over": false
+  },
+  "after": {
+    "mode": "TwoPlayer",
+    "humanWhite": true,
+    "whiteToMove": false,
+    "stmHuman": true,
+    "selected": null,
+    "targets": [],
+    "preFrom": null,
+    "preTo": null,
+    "ply": 1,
+    "over": false
+  }
+}
