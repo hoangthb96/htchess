@@ -3,7 +3,10 @@
 @rendermode InteractiveWebAssembly
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 @using htchess.Shared.Chess
+@using Microsoft.AspNetCore.Components
+@using System.Reflection
 
 <PageTitle>htchess — cờ vua 3D</PageTitle>
 
@@ -13,8 +16,8 @@
 
         @if (ClockOn)
         {
-            <div class="clock clock-top @(TopClockHot ? "hot" : "")">@Fmt(TopMs)</div>
-            <div class="clock clock-bottom @(BottomClockHot ? "hot" : "")">@Fmt(BottomMs)</div>
+            <div class="clock clock-top @(TopClockHot ? "hot" : "") @(TopClockLow ? "low" : "")">@Fmt(TopMs)</div>
+            <div class="clock clock-bottom @(BottomClockHot ? "hot" : "") @(BottomClockLow ? "low" : "")">@Fmt(BottomMs)</div>
         }
 
         @if (_session.AwaitingPromotion)
@@ -32,9 +35,9 @@
             </div>
         }
         <div class="eval-bar" title="Đánh giá của máy (+ trắng / − đen)">
-            <div class="eval-fill" style="height:@(EvalPct())%"></div>
+            <div class="eval-fill" style="height:@(_evalPctV)%"></div>
         </div>
-        <span class="eval-num">@EvalText()</span>
+        <span class="eval-num">@_evalTextV</span>
 
         @if (_aiThinking)
         {
@@ -104,7 +107,7 @@
         }
         <div class="panel-wrap @(_panelPinned ? "pinned" : "")">
             <button class="panel-tab" @onclick="TogglePanel" title="Bảng điều khiển">
-                <span class="tab-status">@StatusText()</span><span class="tab-chev">‹</span>
+                <span class="tab-status">@_statusText</span><span class="tab-chev">‹</span>
             </button>
             <div class="side-panel">
                 <div class="sheet-handle" @onclick="TogglePanel"><span class="sheet-grip"></span></div>
@@ -126,7 +129,7 @@
             </select>
         </div>
 
-        <div class="status">@StatusText()</div>
+        <div class="status">@_statusText</div>
 
         <div class="icon-row">
             <button class="ibtn @(_confirmNew ? "ibtn-warn" : "ibtn-primary")" @onclick="NewGameClick" title="Ván mới">✚</button>
@@ -136,7 +139,9 @@
                     @onclick="DrawClick" disabled="@_session.IsGameOver" title="Cầu hòa">½</button>
             <button class="ibtn" @onclick="Undo" disabled="@(_session.PlyCount == 0 || _aiThinking)" title="Hoàn nước">↩</button>
             <button class="ibtn" @onclick="Flip" title="Xoay bàn">⇄</button>
+            <button class="ibtn" @onclick="ToggleMute" title="Âm thanh">@(_muted ? "🔇" : "🔊")</button>
             <button class="ibtn @(_copied ? "ibtn-ok" : "")" @onclick="CopyPgn" disabled="@(_session.PlyCount == 0)" title="Sao chép PGN">@(_copied ? "✓" : "⧉")</button>
+            <button class="ibtn @(_copiedFen ? "ibtn-ok" : "")" @onclick="CopyFenLink" title="Sao chép link ván">@(_copiedFen ? "✓" : "🔗")</button>
         </div>
         @if (_confirmNew)
         {
@@ -156,12 +161,12 @@
         }
 
         <div class="captured">
-            <div><span class="cap-side">Trắng</span> @(CapLine(_session.CapturedByWhite(), MaterialDiff() > 0 ? MaterialDiff() : 0))</div>
-            <div><span class="cap-side">Đen</span> @(CapLine(_session.CapturedByBlack(), MaterialDiff() < 0 ? -MaterialDiff() : 0))</div>
+            <div><span class="cap-side">Trắng</span> @(CapLine(_capW, _matDiff > 0 ? _matDiff : 0))</div>
+            <div><span class="cap-side">Đen</span> @(CapLine(_capB, _matDiff < 0 ? -_matDiff : 0))</div>
         </div>
 
         <div class="movelist">
-            @{ var hist = _session.History; }
+            @{ var hist = _hist; }
             @if (hist.Count == 0)
             {
                 <div class="move-empty">Chưa có nước đi</div>
@@ -229,6 +234,7 @@
 @code {
     private ElementReference _canvas;
     private IJSObjectReference? _module;
+    private IJSObjectReference? _store;
     private DotNetObjectReference<Chess>? _dotNet;
     private readonly GameSession _session = new();
     private readonly SimpleAi _ai = new();
@@ -251,23 +257,28 @@
     private int _viewPly = -1; // -1 = live board, >=0 = reviewing that ply
     private string _fenInput = "";
     private bool _fenError;
+    private bool _muted;
     private int CurPly => _viewPly < 0 ? _session.PlyCount : _viewPly;
 
-    // eval bar: white win% mapped from centipawns
-    private int EvalPct()
-    {
-        var cp = SimpleAi.EvaluateBoard(_session.Position);
-        var pct = 50 + cp / 40.0; // ±2000cp -> 0..100
-        return (int)Math.Clamp(pct, 2, 98);
-    }
-    private string EvalText()
-    {
-        var cp = SimpleAi.EvaluateBoard(_session.Position);
-        var pawns = cp / 100.0;
-        return pawns >= 0 ? $"+{pawns:0.0}" : $"{pawns:0.0}";
-    }
-    // dev cache-bust: per-mount query guarantees a fresh module after edits
-    private static readonly string _scriptVer = DateTimeOffset.Now.ToUnixTimeMilliseconds().ToString();
+    /// `?fen=...` deep link — loads the position straight onto the board.
+    [Parameter, SupplyParameterFromQuery] public string? fen { get; set; }
+
+    // per-render caches: RunClock re-renders ~10x/s during timed games, so the
+    // markup reads fields recomputed once per state change (PushHighlights)
+    // instead of re-enumerating history/captures/eval on every render
+    private IReadOnlyList<(Rudzoft.ChessLib.Types.Move Move, string San)> _hist =
+        Array.Empty<(Rudzoft.ChessLib.Types.Move Move, string San)>();
+    private List<string> _capW = new();
+    private List<string> _capB = new();
+    private int _matDiff;
+    private int _evalPctV = 50;
+    private string _evalTextV = "+0.0";
+    private string _statusText = "";
+
+    // cache-bust: informational version changes per deploy, stays stable
+    // between reloads so the module can be cached
+    private static readonly string _scriptVer =
+        typeof(Chess).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev";
 
     // ---- clock state (ms remaining per side) ----
     private double _whiteMs, _blackMs, _incMs;
@@ -280,6 +291,8 @@
     private int BottomMs => (int)Math.Max(0, _flipped ? _blackMs : _whiteMs);
     private bool TopClockHot => ClockOn && !_session.IsGameOver && _clockStarted && _session.WhiteToMove == _flipped;
     private bool BottomClockHot => ClockOn && !_session.IsGameOver && _clockStarted && _session.WhiteToMove == !_flipped;
+    private bool TopClockLow => ClockOn && !_session.IsGameOver && _clockStarted && TopMs < 10_000;
+    private bool BottomClockLow => ClockOn && !_session.IsGameOver && _clockStarted && BottomMs < 10_000;
 
     private static string Fmt(int ms)
     {
@@ -287,6 +300,8 @@
         return t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}:{t.Seconds:00}"
              : $"{t.Seconds}.{t.Milliseconds / 100}";
     }
+
+    protected override void OnInitialized() => RefreshCaches();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -303,18 +318,41 @@
                 await Task.Delay(400);
             }
         }
+        try { _store = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/htchess.Shared/js/htchess-store.js"); }
+        catch (JSException) { }
         _dotNet = DotNetObjectReference.Create(this);
         await Js("initScene", _canvas, _dotNet);
         try
         {
             var t = await _module!.InvokeAsync<string>("getPieceTheme");
-            if (!string.IsNullOrEmpty(t) && t != _pieceTheme)
-            {
-                _pieceTheme = t;
-                await InvokeAsync(StateHasChanged);
-            }
+            if (!string.IsNullOrEmpty(t) && t != _pieceTheme) _pieceTheme = t;
         }
         catch (JSException) { }
+        try { _muted = await _module!.InvokeAsync<bool>("getMuted"); }
+        catch (JSException) { }
+
+        // last session's picks prefill the setup card
+        var setup = await StoreGet<SavedSetup>("load", "htchess.setup");
+        if (setup is not null)
+        {
+            _setupAi = setup.SetupAi;
+            _setupSide = setup.SetupSide ?? _setupSide;
+            if (setup.AiDepth > 0) _aiDepth = setup.AiDepth;
+            _tcPick = setup.TcPick ?? _tcPick;
+            _modePick = setup.ModePick ?? _modePick;
+            ResetClock();
+        }
+
+        if (!string.IsNullOrWhiteSpace(fen))
+        {
+            _fenInput = fen;
+            await SetupFen();
+        }
+        else
+        {
+            await RestoreGame();
+        }
+        StateHasChanged();
         _ = RunClock();
     }
 
@@ -335,6 +373,8 @@
                 {
                     _session.Flag(_whiteMs <= 0);
                     await Js("playSound", "end");
+                    RefreshCaches(); // the flag may have ended the game
+                    await SaveGame();
                 }
                 await InvokeAsync(StateHasChanged);
             }
@@ -435,6 +475,8 @@
         await PlayMoveSound(m);
         await PushHighlights();
         await MaybeAiMove();
+        await Js("scrollMoveList");
+        await SaveGame();
     }
 
     private async Task PlayMoveSound(AppliedMove m)
@@ -496,7 +538,7 @@
             await Js("setPieces", pieces);
             await Js("setCaptured", _session.CapturedByBlack(_viewPly), _session.CapturedByWhite(_viewPly));
         }
-        else await SyncPieces();
+        else { await SyncPieces(); await Js("scrollMoveList"); }
         await PushHighlights();
     }
 
@@ -516,6 +558,7 @@
         _flipped = _session.Mode == GameMode.VsAi && !_session.HumanIsWhite;
         await Js("setOrientation", !_flipped);
         await SyncBoard();
+        await SaveGame();
     }
 
     private async Task ApplyPieceTheme() => await Js("setPieceTheme", _pieceTheme);
@@ -535,6 +578,7 @@
 
     private async Task PushHighlights()
     {
+        RefreshCaches();
         string[]? lastMove = null;
         if (_viewPly > 0)
         {
@@ -552,8 +596,25 @@
             premove = _viewPly < 0 && _session.PremoveFrom is not null
                 ? new[] { _session.PremoveFrom, _session.PremoveTo }.Where(x => x is not null).ToArray()
                 : null,
+            draggables = _viewPly < 0 ? _session.DraggableSquares() : new List<string>(),
         });
         StateHasChanged();
+    }
+
+    /// Recompute the values the markup reads — called once per state change
+    /// (and once at init) so a 10Hz clock-tick render is a cheap field read.
+    private void RefreshCaches()
+    {
+        _hist = _session.History;
+        _capW = _session.CapturedByWhite(CurPly);
+        _capB = _session.CapturedByBlack(CurPly);
+        _matDiff = MaterialDiff();
+        // eval bar: white win% mapped from centipawns (±2000cp -> 0..100)
+        var cp = SimpleAi.EvaluateBoard(_session.Position);
+        _evalPctV = (int)Math.Clamp(50 + cp / 40.0, 2, 98);
+        var pawns = cp / 100.0;
+        _evalTextV = pawns >= 0 ? $"+{pawns:0.0}" : $"{pawns:0.0}";
+        _statusText = StatusText();
     }
 
     private async Task Js(string fn, params object?[] args)
@@ -567,7 +628,7 @@
     private CancellationTokenSource? _confirmCts;
 
     /// Armed two-step confirms expire so a stale arm can't fire later.
-    private async void ArmExpire()
+    private async Task ArmExpire()
     {
         _confirmCts?.Cancel();
         var cts = _confirmCts = new CancellationTokenSource();
@@ -578,6 +639,7 @@
             StateHasChanged();
         }
         catch (TaskCanceledException) { }
+        catch (ObjectDisposedException) { } // cts disposed during teardown
     }
 
     private async Task NewGameClick()
@@ -588,7 +650,7 @@
         {
             _confirmNew = true;
             _confirmResign = _confirmDraw = false;
-            ArmExpire();
+            _ = ArmExpire();
             return;
         }
         await NewGame();
@@ -604,6 +666,12 @@
             _ => "ai-r",
         };
         _setupOpen = false;
+        // remember the picks so the next visit's setup card is prefilled
+        await Store("save", "htchess.setup", new
+        {
+            setupAi = _setupAi, setupSide = _setupSide,
+            aiDepth = _aiDepth, tcPick = _tcPick, modePick = _modePick,
+        });
         await NewGame();
     }
 
@@ -628,6 +696,7 @@
         _flipped = mode == GameMode.VsAi && !humanWhite;
         await Js("setOrientation", !_flipped);
         await SyncBoard();
+        await Store("clear", "htchess.game"); // a fresh deal wipes the saved game
     }
 
     private void ResetClock()
@@ -647,26 +716,29 @@
 
     private async Task ResignClick()
     {
-        if (!_confirmResign) { _confirmResign = true; _confirmDraw = _confirmNew = false; ArmExpire(); return; }
+        if (!_confirmResign) { _confirmResign = true; _confirmDraw = _confirmNew = false; _ = ArmExpire(); return; }
         _confirmResign = false;
         _session.Resign();
         await Js("playSound", "end");
         await PushHighlights();
+        await SaveGame();
     }
 
     private async Task DrawClick()
     {
-        if (!_confirmDraw) { _confirmDraw = true; _confirmResign = _confirmNew = false; _drawDeclined = false; ArmExpire(); return; }
+        if (!_confirmDraw) { _confirmDraw = true; _confirmResign = _confirmNew = false; _drawDeclined = false; _ = ArmExpire(); return; }
         _confirmDraw = false;
         if (_session.OfferDraw()) { await Js("playSound", "end"); }
         else _drawDeclined = true;
         await PushHighlights();
+        await SaveGame();
     }
 
     private async Task Undo()
     {
         _session.Undo();
         await SyncBoard();
+        await SaveGame();
     }
 
     private async Task Flip()
@@ -675,26 +747,63 @@
         await Js("flipBoard");
     }
 
+    /// chess3d.js forwards the 'f' key here.
+    [JSInvokable]
+    public async Task FlipKey() => await Flip();
+
+    private async Task ToggleMute()
+    {
+        _muted = !_muted;
+        await Js("setMuted", _muted);
+    }
+
     private string Pgn()
     {
+        // "½-½" is a display glyph, not a legal PGN result token
+        var result = _session.ResultTag switch
+        {
+            "½-½" => "1/2-1/2",
+            { } tag => tag,
+            _ => "*",
+        };
+        var (white, black) = _session.Mode != GameMode.VsAi ? ("Trắng", "Đen")
+            : _session.HumanIsWhite ? ("Người chơi", "Máy") : ("Máy", "Người chơi");
         var sb = new System.Text.StringBuilder();
+        // Seven Tag Roster — the minimum a PGN file must carry
+        sb.AppendLine("[Event \"htchess casual game\"]");
+        sb.AppendLine("[Site \"htchess\"]");
+        sb.Append("[Date \"").Append(DateTime.Now.ToString("yyyy.MM.dd")).AppendLine("\"]");
+        sb.AppendLine("[Round \"-\"]");
+        sb.Append("[White \"").Append(white).AppendLine("\"]");
+        sb.Append("[Black \"").Append(black).AppendLine("\"]");
+        sb.Append("[Result \"").Append(result).AppendLine("\"]");
+        sb.AppendLine();
         var hist = _session.History;
         for (var i = 0; i < hist.Count; i++)
         {
             if (i % 2 == 0) sb.Append(i / 2 + 1).Append(". ");
             sb.Append(hist[i].San).Append(' ');
         }
-        sb.Append(_session.ResultTag ?? "*");
+        sb.Append(result);
         return sb.ToString();
     }
 
     private bool _copied;
+    private bool _copiedFen;
 
     private async Task CopyPgn()
     {
         await Js("copyText", Pgn());
         _copied = true;
         _ = Task.Delay(1500).ContinueWith(_ => { _copied = false; InvokeAsync(StateHasChanged); });
+    }
+
+    private async Task CopyFenLink()
+    {
+        var url = $"{Nav.Uri.Split('?')[0]}?fen={Uri.EscapeDataString(_session.CurrentFen)}";
+        await Js("copyText", url);
+        _copiedFen = true;
+        _ = Task.Delay(1500).ContinueWith(_ => { _copiedFen = false; InvokeAsync(StateHasChanged); });
     }
 
     private static readonly Dictionary<char, string> Glyphs = new()
@@ -721,9 +830,19 @@
         'Q' => 9, 'R' => 5, 'B' => 3, 'N' => 3, _ => 1,
     };
 
-    /// Material lead in pawns from white's perspective.
-    private int MaterialDiff() =>
-        _session.CapturedByWhite().Sum(PieceVal) - _session.CapturedByBlack().Sum(PieceVal);
+    /// Material lead in pawns from white's perspective — counted on the board
+    /// itself (reviewed ply when navigating, live otherwise) so FEN setups and
+    /// promotions stay honest.
+    private int MaterialDiff()
+    {
+        var diff = 0;
+        foreach (var p in _viewPly < 0 ? _session.GetPosition() : _session.PiecesAt(_viewPly))
+        {
+            if (p.Type == "K") continue;
+            diff += p.Color == "w" ? PieceVal(p.Type) : -PieceVal(p.Type);
+        }
+        return diff;
+    }
 
     private string StatusText()
     {
@@ -735,12 +854,98 @@
         return $"Lượt: {side}{check}{pre}{you}";
     }
 
+    // ---- localStorage persistence (htchess-store.js) ----
+
+    private async Task Store(string fn, params object?[] args)
+    {
+        if (_store is null) return;
+        try { await _store.InvokeVoidAsync(fn, args); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task<T?> StoreGet<T>(string fn, params object?[] args)
+    {
+        if (_store is null) return default;
+        try { return await _store.InvokeAsync<T>(fn, args); }
+        catch (JSException) { return default; }
+        catch (JSDisconnectedException) { return default; }
+    }
+
+    /// Persist the live game so a reload (or an accidental nav) resumes it.
+    private async Task SaveGame()
+    {
+        if (_session.PlyCount == 0) { await Store("clear", "htchess.game"); return; }
+        await Store("save", "htchess.game", new
+        {
+            modePick = _modePick,
+            flipped = _flipped,
+            tcPick = _tcPick,
+            whiteMs = _whiteMs,
+            blackMs = _blackMs,
+            incMs = _incMs,
+            clockStarted = _clockStarted,
+            startFen = _session.StartFen,
+            moves = _session.UciMoves,
+            humanWhite = _session.HumanIsWhite,
+            over = _session.IsGameOver,
+        });
+    }
+
+    /// Resume the locally saved game, if one with actual moves exists.
+    private async Task RestoreGame()
+    {
+        var saved = await StoreGet<SavedGame>("load", "htchess.game");
+        if (saved?.Moves is not { Count: > 0 }) return;
+        _modePick = saved.ModePick ?? _modePick;
+        _flipped = saved.Flipped;
+        _tcPick = saved.TcPick ?? _tcPick;
+        _whiteMs = saved.WhiteMs;
+        _blackMs = saved.BlackMs;
+        _incMs = saved.IncMs;
+        _clockStarted = saved.ClockStarted && !saved.Over;
+        // ResolveMode re-rolls ai-r's random side — the saved side is the truth.
+        var mode = _modePick == "2p" ? GameMode.TwoPlayer : GameMode.VsAi;
+        _session.NewGameFromMoves(saved.StartFen, mode, saved.HumanWhite, saved.Moves);
+        _setupOpen = false;
+        await Js("setOrientation", !_flipped);
+        await SyncBoard();
+    }
+
+    private sealed class SavedGame
+    {
+        public string? ModePick { get; set; }
+        public bool Flipped { get; set; }
+        public string? TcPick { get; set; }
+        public double WhiteMs { get; set; }
+        public double BlackMs { get; set; }
+        public double IncMs { get; set; }
+        public bool ClockStarted { get; set; }
+        public string? StartFen { get; set; }
+        public List<string>? Moves { get; set; }
+        public bool HumanWhite { get; set; }
+        public bool Over { get; set; }
+    }
+
+    private sealed class SavedSetup
+    {
+        public bool SetupAi { get; set; }
+        public string? SetupSide { get; set; }
+        public int AiDepth { get; set; }
+        public string? TcPick { get; set; }
+        public string? ModePick { get; set; }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _clockTimer?.Dispose();
+        _confirmCts?.Cancel();
+        _confirmCts?.Dispose();
         await Js("dispose");
         _dotNet?.Dispose();
         if (_module is not null)
             try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
+        if (_store is not null)
+            try { await _store.DisposeAsync(); } catch (JSDisconnectedException) { }
     }
 }
