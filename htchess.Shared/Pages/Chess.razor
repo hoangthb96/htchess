@@ -50,6 +50,58 @@
                 </div>
             </div>
         }
+        @if (_setupOpen)
+        {
+            <div class="setup-overlay">
+                <div class="setup-box">
+                    <div class="setup-title">Ván mới</div>
+                    <div class="setup-modes">
+                        <button class="setup-mode @(!_setupAi ? "sel" : "")" @onclick="() => _setupAi = false">
+                            <span class="mode-glyph">⚔</span>
+                            <span class="mode-name">2 người</span>
+                            <span class="mode-desc">Cùng thiết bị</span>
+                        </button>
+                        <button class="setup-mode @(_setupAi ? "sel" : "")" @onclick="() => _setupAi = true">
+                            <span class="mode-glyph">♞</span>
+                            <span class="mode-name">vs Máy</span>
+                            <span class="mode-desc">Đấu với AI</span>
+                        </button>
+                    </div>
+                    @if (_setupAi)
+                    {
+                        <div class="setup-row">
+                            <span class="setup-label">Bên của bạn</span>
+                            <div class="seg">
+                                <button class="seg-btn @(_setupSide == "w" ? "sel" : "")" @onclick='() => _setupSide = "w"'>Trắng</button>
+                                <button class="seg-btn @(_setupSide == "b" ? "sel" : "")" @onclick='() => _setupSide = "b"'>Đen</button>
+                                <button class="seg-btn @(_setupSide == "r" ? "sel" : "")" @onclick='() => _setupSide = "r"'>Ngẫu nhiên</button>
+                            </div>
+                        </div>
+                        <div class="setup-row">
+                            <span class="setup-label">Độ khó</span>
+                            <div class="seg">
+                                <button class="seg-btn @(_aiDepth == 1 ? "sel" : "")" @onclick="() => _aiDepth = 1">Yếu</button>
+                                <button class="seg-btn @(_aiDepth == 2 ? "sel" : "")" @onclick="() => _aiDepth = 2">Vừa</button>
+                                <button class="seg-btn @(_aiDepth == 3 ? "sel" : "")" @onclick="() => _aiDepth = 3">Khá</button>
+                            </div>
+                        </div>
+                    }
+                    <div class="setup-row">
+                        <span class="setup-label">Thời gian</span>
+                        <select @bind="_tcPick" class="form-select form-select-sm">
+                            <option value="none">Không giờ</option>
+                            <option value="1+0">1+0 siêu chớp</option>
+                            <option value="3+0">3+0 chớp</option>
+                            <option value="3+2">3+2 chớp</option>
+                            <option value="5+0">5+0 chớp</option>
+                            <option value="5+3">5+3 chớp</option>
+                            <option value="10+0">10+0 nhanh</option>
+                        </select>
+                    </div>
+                    <button class="setup-play" @onclick="StartFromSetup">♟ Chơi</button>
+                </div>
+            </div>
+        }
         <div class="panel-wrap @(_panelPinned ? "pinned" : "")">
             <button class="panel-tab" @onclick="TogglePanel" title="Bảng điều khiển">
                 <span class="tab-status">@StatusText()</span><span class="tab-chev">‹</span>
@@ -61,6 +113,7 @@
                 <option value="2p">2 người</option>
                 <option value="ai-w">vs Máy (Trắng)</option>
                 <option value="ai-b">vs Máy (Đen)</option>
+                <option value="ai-r">vs Máy (Ngẫu nhiên)</option>
             </select>
             <select @bind="_tcPick" @bind:after="ResetClock" class="form-select form-select-sm" title="Thời gian">
                 <option value="none">Không giờ</option>
@@ -182,6 +235,9 @@
     private string _modePick = "2p";
     private string _tcPick = "none";
     private string _pieceTheme = "classic";
+    private bool _setupOpen = true;
+    private bool _setupAi;
+    private string _setupSide = "r"; // w = Trắng, b = Đen, r = ngẫu nhiên
     private bool _aiThinking;
     private bool _flipped;
     private bool _confirmResign;
@@ -449,12 +505,7 @@
         _fenError = false;
         try
         {
-            var (mode, humanWhite) = _modePick switch
-            {
-                "ai-w" => (GameMode.VsAi, true),
-                "ai-b" => (GameMode.VsAi, false),
-                _ => (GameMode.TwoPlayer, true),
-            };
+            var (mode, humanWhite) = ResolveMode();
             var fen = _fenInput.Trim();
             if (fen.Length == 0) _session.NewGame(mode, humanWhite);
             else _session.NewGameFromFen(fen, mode, humanWhite);
@@ -543,14 +594,31 @@
         await NewGame();
     }
 
+    /// Confirm the pre-game setup: map the picks onto the mode select and deal.
+    private async Task StartFromSetup()
+    {
+        _modePick = !_setupAi ? "2p" : _setupSide switch
+        {
+            "w" => "ai-w",
+            "b" => "ai-b",
+            _ => "ai-r",
+        };
+        _setupOpen = false;
+        await NewGame();
+    }
+
+    /// ai-r rolls a fresh random side every game.
+    private (GameMode mode, bool humanWhite) ResolveMode() => _modePick switch
+    {
+        "ai-w" => (GameMode.VsAi, true),
+        "ai-b" => (GameMode.VsAi, false),
+        "ai-r" => (GameMode.VsAi, Random.Shared.Next(2) == 0),
+        _ => (GameMode.TwoPlayer, true),
+    };
+
     private async Task NewGame()
     {
-        var (mode, humanWhite) = _modePick switch
-        {
-            "ai-w" => (GameMode.VsAi, true),
-            "ai-b" => (GameMode.VsAi, false),
-            _ => (GameMode.TwoPlayer, true),
-        };
+        var (mode, humanWhite) = ResolveMode();
         _session.NewGame(mode, humanWhite);
         _confirmResign = _confirmDraw = _confirmNew = _drawDeclined = false;
         _fenError = false;
@@ -663,7 +731,8 @@
         var side = _session.WhiteToMove ? "Trắng" : "Đen";
         var check = _session.IsCheck ? " — CHIẾU!" : "";
         var pre = _session.PremoveFrom is not null ? " (premove)" : "";
-        return $"Lượt: {side}{check}{pre}";
+        var you = _session.Mode == GameMode.VsAi ? $" · bạn: {(_session.HumanIsWhite ? "Trắng" : "Đen")}" : "";
+        return $"Lượt: {side}{check}{pre}{you}";
     }
 
     public async ValueTask DisposeAsync()
