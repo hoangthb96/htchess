@@ -75,6 +75,34 @@ function knightHeadGeo() {
         bevelSize: 0.02, bevelSegments: 2, curveSegments: 10,
     });
     geo.translate(0, 0, -0.082); // center on z including bevel
+    // sculpt: taper thickness toward the muzzle so the head reads 3D, not slab
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i);
+        const t = THREE.MathUtils.clamp((x - 0.08) / 0.22, 0, 1);
+        pos.setZ(i, z * (1 - 0.42 * t));
+    }
+    geo.computeVertexNormals();
+    return geo;
+}
+
+// raised fin along the neck crest — carved-mane look, sits proud of the silhouette
+function maneGeo() {
+    const s = new THREE.Shape();
+    s.moveTo(0.03, 0.545);                                    // behind the ears
+    s.quadraticCurveTo(-0.05, 0.49, -0.075, 0.42);            // outer crest
+    s.quadraticCurveTo(-0.145, 0.33, -0.155, 0.22);           // outer mane
+    s.quadraticCurveTo(-0.16, 0.10, -0.135, 0.02);            // down to neck base
+    s.lineTo(-0.10, 0.02);
+    s.quadraticCurveTo(-0.115, 0.10, -0.11, 0.20);            // inner neck
+    s.quadraticCurveTo(-0.10, 0.30, -0.05, 0.40);             // inner mane
+    s.quadraticCurveTo(-0.01, 0.46, 0.03, 0.50);              // inner crest
+    s.closePath();
+    const geo = new THREE.ExtrudeGeometry(s, {
+        depth: 0.05, bevelEnabled: true, bevelThickness: 0.015,
+        bevelSize: 0.015, bevelSegments: 2, curveSegments: 8,
+    });
+    geo.translate(0, 0, -0.04);
     return geo;
 }
 
@@ -127,10 +155,13 @@ function buildStaunton(type, mat, detail, white) {
             const head = add(knightHeadGeo(), 0.30);
             head.scale.setScalar(0.78);
             head.rotation.y = white ? Math.PI / 2 : -Math.PI / 2; // muzzle toward the opponent
+            const mane = new THREE.Mesh(maneGeo(), mat);
+            mane.castShadow = true;
+            head.add(mane);
             const eye = ball(0.02, 8);
-            for (const zc of [-0.088, 0.088]) {
+            for (const zc of [-0.077, 0.077]) {
                 const e = new THREE.Mesh(eye, detail);
-                e.position.set(0.105, 0.40, zc / 0.78); // z applied pre-scale
+                e.position.set(0.105, 0.40, zc / 0.78); // z applied pre-scale, half-embedded
                 head.add(e);
             }
             break;
@@ -143,8 +174,8 @@ function buildStaunton(type, mat, detail, white) {
                 [0.15, 0.55], [0.115, 0.575], [0.09, 0.59],
             ]));
             const mitre = ball(0.10);
-            mitre.scale(1, 1.35, 1);
-            add(mitre, 0.66);
+            mitre.scale(1, 1.5, 1);
+            add(mitre, 0.67);
             const slit = new THREE.Mesh(box(0.02, 0.15, 0.11), detail);
             slit.position.set(0, 0.675, 0);
             slit.rotation.z = 0.55;
@@ -160,7 +191,12 @@ function buildStaunton(type, mat, detail, white) {
                 [0.185, 0.68], [0.17, 0.715], [0.14, 0.735], [0.145, 0.765],
                 [0.125, 0.79],
             ]));
-            // coronet: 8 prongs leaning out, each topped with a ball
+            // coronet: band + 8 prongs leaning out, each topped with a ball
+            const band = new THREE.Mesh(new THREE.TorusGeometry(0.118, 0.016, 8, 28), mat);
+            band.rotation.x = Math.PI / 2;
+            band.position.y = 0.795;
+            band.castShadow = true;
+            g.add(band);
             const prong = new THREE.ConeGeometry(0.03, 0.11, 8);
             const tip = ball(0.028, 8);
             for (let i = 0; i < 8; i++) {
@@ -190,8 +226,9 @@ function buildStaunton(type, mat, detail, white) {
             const dome = ball(0.13);
             dome.scale(1, 0.75, 1);
             add(dome, 0.845);
-            add(box(0.05, 0.18, 0.05), 0.955);
-            add(box(0.15, 0.05, 0.05), 0.965);
+            add(new THREE.CapsuleGeometry(0.026, 0.125, 4, 10), 0.945);
+            const hbar = add(new THREE.CapsuleGeometry(0.026, 0.095, 4, 10), 0.955);
+            hbar.rotation.z = Math.PI / 2;
             break;
         }
     }
@@ -265,11 +302,14 @@ function buildModern(type, mat, detail, white) {
 const PIECE_THEMES = {
     classic: {
         build: buildStaunton,
-        mats: () => [
-            new THREE.MeshStandardMaterial({ color: 0xefe4c9, roughness: 0.48, metalness: 0.05, envMapIntensity: 0.35 }),
-            new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.42, metalness: 0.15, envMapIntensity: 0.4 }),
-            new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6, envMapIntensity: 0.3 }),
-        ],
+        mats: () => {
+            const bump = woodBump();
+            return [
+                new THREE.MeshStandardMaterial({ color: 0xefe4c9, roughness: 0.48, metalness: 0.05, envMapIntensity: 0.35, bumpMap: bump, bumpScale: 0.25 }),
+                new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.36, metalness: 0.18, envMapIntensity: 0.55, bumpMap: bump, bumpScale: 0.35 }),
+                new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.6, envMapIntensity: 0.3 }),
+            ];
+        },
     },
     modern: {
         build: buildModern,
@@ -298,9 +338,41 @@ try {
 
 function matsFor(t) { return themeMats[t] ??= PIECE_THEMES[t].mats(); }
 
+// subtle vertical grain — turned wood on lathe UVs reads correctly
+let _woodBump;
+function woodBump() {
+    if (_woodBump) return _woodBump;
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d');
+    x.fillStyle = '#808080';
+    x.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 260; i++) {
+        const gx = Math.random() * 128, sh = Math.random() < 0.5 ? 0 : 255;
+        x.strokeStyle = `rgba(${sh},${sh},${sh},${0.05 + Math.random() * 0.10})`;
+        x.lineWidth = 0.5 + Math.random();
+        x.beginPath();
+        x.moveTo(gx, -4);
+        x.bezierCurveTo(gx + (Math.random() * 5 - 2.5), 40, gx + (Math.random() * 5 - 2.5), 88, gx + (Math.random() * 5 - 2.5), 132);
+        x.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(2, 1);
+    return (_woodBump = t);
+}
+
+const FELT_R = { P: 0.265, R: 0.29, N: 0.28, B: 0.27, Q: 0.30, K: 0.305 };
+
 function buildPiece(type, white) {
     const [wm, bm, dm] = matsFor(pieceTheme);
     const g = PIECE_THEMES[pieceTheme].build(type, white ? wm : bm, dm, white);
+    // felt ring under the base — real sets always have it, and it grounds the piece
+    const fr = pieceTheme === 'modern' ? 0.255 : FELT_R[type];
+    const felt = new THREE.Mesh(cyl(fr, fr * 0.97, 0.014, 28), dm);
+    felt.position.y = 0.007;
+    felt.castShadow = false;
+    g.add(felt);
     g.scale.setScalar(0.85);
     g.userData.type = type;
     g.userData.isWhite = white;
