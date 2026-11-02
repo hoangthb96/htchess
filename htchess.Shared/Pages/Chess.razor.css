@@ -264,6 +264,10 @@
 .clock-top { top: 0.6rem; left: 3.4rem; }
 .clock-bottom { bottom: 0.6rem; left: 3.4rem; }
 .clock.hot { background: var(--accent-soft); color: #fff; }
+/* under 10s left: the clock turns danger-red; the running side also pulses */
+.clock.low { background: var(--danger); color: #fff; }
+.clock.low.hot { animation: clockpulse 0.9s ease-in-out infinite; }
+@keyframes clockpulse { 50% { filter: brightness(1.35); } }
 
 .end-overlay {
     position: absolute;
