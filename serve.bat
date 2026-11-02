@@ -5,9 +5,8 @@ setlocal
 cd /d "%~dp0"
 set "DOTNET_ROOT=%USERPROFILE%\.dotnet"
 set "ASPNETCORE_URLS=http://0.0.0.0:5272"
-if not exist "publish\htchess.exe" (
-    echo First run: publishing release build...
-    "%DOTNET_ROOT%\dotnet.exe" publish htchess\htchess.csproj -c Release -o publish || exit /b 1
-)
+rem Always publish so the served bits match the current source.
+echo Publishing release build...
+"%DOTNET_ROOT%\dotnet.exe" publish htchess\htchess.csproj -c Release -o publish || exit /b 1
 cd /d "%~dp0publish"
 "htchess.exe"
