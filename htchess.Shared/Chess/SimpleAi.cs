@@ -148,7 +148,7 @@ public sealed class SimpleAi
         {
             var st = new State();
             pos.MakeMove(m, in st);
-            var score = -Negamax(pos, depth - 1, -Mate * 2, -alpha, 1);
+            var score = -await Negamax(pos, depth - 1, -Mate * 2, -alpha, 1);
             pos.TakeMove(m);
 
             if (score > bestScore || (score == bestScore && _rng.Next(2) == 0))
@@ -163,7 +163,7 @@ public sealed class SimpleAi
         return best;
     }
 
-    private int Negamax(IPosition pos, int depth, int alpha, int beta, int ply)
+    private async Task<int> Negamax(IPosition pos, int depth, int alpha, int beta, int ply)
     {
         Nodes++;
         var moves = new MoveList();
@@ -171,7 +171,9 @@ public sealed class SimpleAi
         if (moves.Length == 0)
             return pos.InCheck ? -Mate + ply : 0;
         if (pos.Rule50 >= 100 || pos.IsRepetition) return 0;
-        if (depth <= 0) return Evaluate(pos);
+        // yield on deep subtrees so the single WASM thread can pump the UI
+        if (depth >= 2 && (Nodes & 1023) == 0) await Task.Yield();
+        if (depth <= 0) return Quiesce(pos, alpha, beta, 0);
 
         var ordered = new List<Move>(moves.Length);
         foreach (var em in moves) ordered.Add(em.Move);
@@ -182,13 +184,43 @@ public sealed class SimpleAi
         {
             var st = new State();
             pos.MakeMove(m, in st);
-            var score = -Negamax(pos, depth - 1, -beta, -alpha, ply + 1);
+            var score = -await Negamax(pos, depth - 1, -beta, -alpha, ply + 1);
             pos.TakeMove(m);
             if (score > bestScore) bestScore = score;
             if (score > alpha) alpha = score;
             if (alpha >= beta) break;
         }
         return bestScore;
+    }
+
+    private int Quiesce(IPosition pos, int alpha, int beta, int qply)
+    {
+        Nodes++;
+        var standPat = Evaluate(pos);
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
+        if (qply >= 6) return alpha;
+        var moves = new MoveList();
+        moves.Generate(in pos, MoveGenerationType.Legal);
+        // captures only (incl. en passant); skip quiet moves to bound the tree
+        var caps = new List<Move>(moves.Length);
+        foreach (var em in moves)
+        {
+            var m = em.Move;
+            if (pos.GetPiece(m.ToSquare()) != Piece.EmptyPiece || m.IsEnPassantMove() || m.IsPromotionMove())
+                caps.Add(m);
+        }
+        caps.Sort((a, b) => OrderScore(pos, b) - OrderScore(pos, a));
+        foreach (var m in caps)
+        {
+            var st = new State();
+            pos.MakeMove(m, in st);
+            var score = -Quiesce(pos, -beta, -alpha, qply + 1);
+            pos.TakeMove(m);
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+        }
+        return alpha;
     }
 
     private static List<Move> OrderedLegal(IPosition pos)
